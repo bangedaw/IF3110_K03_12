@@ -1,0 +1,13 @@
+version: "2"
+linters:
+  enable:
+    - gosec
+    - bodyclose
+    - errorlint
+  exclusions:
+    paths:
+      - internal/apigen
+      - internal/platformdb/gen
+formatters:
+  enable:
+    - gofmt
