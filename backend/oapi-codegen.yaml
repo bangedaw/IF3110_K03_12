@@ -1,0 +1,4 @@
+package: apigen
+output: internal/apigen/types.gen.go
+generate:
+  models: true

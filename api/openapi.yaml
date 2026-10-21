@@ -1,0 +1,489 @@
+openapi: 3.0.3
+info:
+  title: Database Management Platform API
+  version: 0.1.0
+  description: |
+    Konvensi:
+    - Semua endpoint di bawah /api, JSON camelCase, waktu ISO 8601 UTC, ID berupa number (int64).
+    - Error memakai RFC 9457 Problem Details (`application/problem+json`), lihat schema Problem.
+    - Session via cookie HttpOnly `dbmp_session` (tidak pernah ada di body/URL).
+    - Semua request POST/PUT/PATCH/DELETE wajib header `X-CSRF-Token` berisi csrfToken
+      dari /api/auth/login atau /api/auth/me. Tanpa/salah → 403 CSRF_INVALID.
+    - Pagination: `?limit=&offset=` → `{ items, limit, offset, total? }`.
+servers:
+  - url: /
+security:
+  - cookieAuth: []
+
+paths:
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: Login dengan username dan password
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Login berhasil; cookie session di-set via Set-Cookie
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/auth/logout:
+    post:
+      tags: [auth]
+      summary: Logout dan revoke session saat ini
+      responses:
+        '204': { description: Logout berhasil }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /api/auth/me:
+    get:
+      tags: [auth]
+      summary: User yang sedang login + csrfToken
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthSession' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /api/admin/users:
+    get:
+      tags: [admin]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UserPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/admin/users/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    get:
+      tags: [admin]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [admin]
+      description: Menonaktifkan user (isActive=false) me-revoke semua session-nya.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [admin]
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/users/{userId}/password:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [admin]
+      summary: Reset password user (me-revoke semua session user)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PasswordReset' }
+      responses:
+        '204': { description: Password direset }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/admin/users/{userId}/sessions/revoke:
+    parameters:
+      - $ref: '#/components/parameters/UserId'
+    post:
+      tags: [admin]
+      summary: Revoke semua session user
+      responses:
+        '204': { description: Session di-revoke }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/admin/groups:
+    get:
+      tags: [admin]
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/admin/groups/{groupId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [admin]
+      responses:
+        '200':
+          description: Group beserta anggotanya
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GroupDetail' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [admin]
+      responses:
+        '204': { description: Deleted }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/groups/{groupId}/members/{userId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/UserId'
+    put:
+      tags: [admin]
+      summary: Tambah user ke group (idempoten)
+      responses:
+        '204': { description: Anggota ditambahkan }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [admin]
+      summary: Keluarkan user dari group
+      responses:
+        '204': { description: Anggota dikeluarkan }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/groups/{groupId}/grants:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    get:
+      tags: [admin]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/Grant' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/groups/{groupId}/grants/{databaseId}:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+      - $ref: '#/components/parameters/DatabaseId'
+    put:
+      tags: [admin]
+      summary: Set level akses group pada database (buat atau ubah)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GrantUpsert' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Grant' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [admin]
+      responses:
+        '204': { description: Grant dicabut }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: dbmp_session
+    csrfToken:
+      type: apiKey
+      in: header
+      name: X-CSRF-Token
+
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Offset:
+      name: offset
+      in: query
+      schema: { type: integer, minimum: 0, default: 0 }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    GroupId:
+      name: groupId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    DatabaseId:
+      name: databaseId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+
+  responses:
+    Unauthenticated:
+      description: Belum login atau session berakhir (UNAUTHENTICATED / SESSION_EXPIRED)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Forbidden:
+      description: Login tetapi tidak berhak (FORBIDDEN / CSRF_INVALID)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    NotFound:
+      description: Resource tidak ditemukan
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    Conflict:
+      description: Konflik (duplikat atau revisi basi)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    ValidationFailed:
+      description: Input tidak valid; detail per field ada di `errors`
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+    DBUnreachable:
+      description: Database target tidak terjangkau (DB_UNREACHABLE)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/Problem' }
+
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type: { type: string, example: about:blank }
+        title: { type: string, example: Forbidden }
+        status: { type: integer, example: 403 }
+        detail: { type: string }
+        code:
+          type: string
+          description: Kode error aplikasi
+          enum: [UNAUTHENTICATED, SESSION_EXPIRED, FORBIDDEN, CSRF_INVALID, NOT_FOUND,
+                 VALIDATION_FAILED, CONFLICT, DB_UNREACHABLE, MIGRATION_FAILED,
+                 METHOD_NOT_ALLOWED, INTERNAL]
+        errors:
+          type: object
+          description: Pesan error per field (hanya VALIDATION_FAILED)
+          additionalProperties: { type: string }
+    AccessLevel:
+      type: string
+      enum: [view, edit]
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+    AuthSession:
+      type: object
+      required: [user, csrfToken]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        csrfToken: { type: string }
+    User:
+      type: object
+      required: [id, username, displayName, isPlatformAdmin, isActive, createdAt, updatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        username: { type: string }
+        displayName: { type: string }
+        isPlatformAdmin: { type: boolean }
+        isActive: { type: boolean }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    UserCreate:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 3, maxLength: 64, pattern: '^[A-Za-z0-9_.-]+$' }
+        displayName: { type: string, maxLength: 128 }
+        password: { type: string, format: password, minLength: 8, maxLength: 256 }
+        isPlatformAdmin: { type: boolean, default: false }
+    UserUpdate:
+      type: object
+      description: Field yang tidak dikirim tidak diubah.
+      properties:
+        displayName: { type: string, maxLength: 128 }
+        isPlatformAdmin: { type: boolean }
+        isActive: { type: boolean }
+    PasswordReset:
+      type: object
+      required: [password]
+      properties:
+        password: { type: string, format: password, minLength: 8, maxLength: 256 }
+    UserPage:
+      type: object
+      required: [items, limit, offset, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/User' }
+        limit: { type: integer }
+        offset: { type: integer }
+        total: { type: integer, format: int64 }
+    Group:
+      type: object
+      required: [id, name, description, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        description: { type: string }
+        createdAt: { type: string, format: date-time }
+    GroupDetail:
+      allOf:
+        - $ref: '#/components/schemas/Group'
+        - type: object
+          required: [members]
+          properties:
+            members:
+              type: array
+              items: { $ref: '#/components/schemas/User' }
+    GroupCreate:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        description: { type: string, maxLength: 512 }
+    GroupUpdate:
+      type: object
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        description: { type: string, maxLength: 512 }
+    GroupPage:
+      type: object
+      required: [items, limit, offset, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Group' }
+        limit: { type: integer }
+        offset: { type: integer }
+        total: { type: integer, format: int64 }
+    Grant:
+      type: object
+      required: [databaseId, databaseName, level]
+      properties:
+        databaseId: { type: integer, format: int64 }
+        databaseName: { type: string }
+        level: { $ref: '#/components/schemas/AccessLevel' }
+    GrantUpsert:
+      type: object
+      required: [level]
+      properties:
+        level: { $ref: '#/components/schemas/AccessLevel' }
+
