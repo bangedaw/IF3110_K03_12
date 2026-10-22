@@ -22,9 +22,9 @@ func (e Explainer) Explain(ctx context.Context,in dbms.ExplainInput)(*dbms.Expla
     for _,s:=range stmts{if !mysqlExplainable(first(s.SQL)){hasDDL=true}}
     if in.Analyze&&hasDDL{return nil,errors.New("MySQL EXPLAIN ANALYZE is disabled for scripts containing DDL")}
     tx,err:=e.DB.BeginTx(ctx,&sql.TxOptions{ReadOnly:false});if err!=nil{return nil,err}
-    defer tx.Rollback() // always rollback to prevent data changes where transactional semantics allow it
+    defer tx.Rollback() 
     timeout:=in.StatementTimeout;if timeout<=0{timeout=10*time.Second}
-    // MySQL session timeout is expressed in milliseconds. Set a bounded session value.
+    // bounded session value, timeout dihitung dlm milisekon
     _,_ = tx.ExecContext(ctx,`SET SESSION MAX_EXECUTION_TIME = ?`,timeout.Milliseconds())
     out:=&dbms.ExplainResult{Statements:[]dbms.ExplainStatement{}}
     for _,s:=range stmts{

@@ -21,7 +21,7 @@ func (e Explainer) Explain(ctx context.Context, in dbms.ExplainInput) (*dbms.Exp
     conn, err := e.Connector.Connect(ctx); if err!=nil { return nil, err }
     defer conn.Close(context.Background())
     tx, err := conn.Begin(ctx); if err!=nil { return nil, err }
-    defer tx.Rollback(context.Background()) // Always rollback, including ANALYZE.
+    defer tx.Rollback(context.Background()) 
     timeout:=in.StatementTimeout; if timeout<=0 { timeout=10*time.Second }
     if _,err=tx.Exec(ctx,`SELECT set_config('statement_timeout',$1,true)`,timeout.String()); err!=nil { return nil,err }
 
@@ -31,7 +31,6 @@ func (e Explainer) Explain(ctx context.Context, in dbms.ExplainInput) (*dbms.Exp
         explainable:=isExplainablePG(typ)
         item:=dbms.ExplainStatement{Index:st.Index,SQL:st.SQL,Explainable:explainable}
         if !explainable {
-            // Run DDL inside the transaction so later statements can refer to it.
             if _,err=tx.Exec(ctx,st.SQL); err!=nil { return nil,fmt.Errorf("statement %d (context DDL): %w",st.Index,err) }
             item.Notice="DDL executed only to establish context; not explainable"
             result.Statements=append(result.Statements,item); continue
@@ -57,5 +56,4 @@ func isExplainablePG(k string) bool {
     switch k { case "SELECT","INSERT","UPDATE","DELETE","MERGE","WITH": return true; default:return false }
 }
 
-// Ensure the connector signature remains tied to pgx's dedicated connection.
 var _ interface { Connect(context.Context) (*pgx.Conn,error) } = DSNConnector{}

@@ -84,6 +84,5 @@ func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyRes
 
 var ErrLockBusy = errors.New("target database already has a migration running")
 
-// DSNConnector creates a dedicated connection per Apply call.
 type DSNConnector struct { DSN string }
 func (d DSNConnector) Connect(ctx context.Context) (*pgx.Conn, error) { return pgx.Connect(ctx, strings.TrimSpace(d.DSN)) }

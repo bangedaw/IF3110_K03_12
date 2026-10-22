@@ -23,13 +23,11 @@ func (m Migrator) Apply(ctx context.Context,in dbms.ApplyInput)(*dbms.ApplyResul
     stmts,err:=sqlsplit.Split(in.SQL,sqlsplit.MySQL);if err!=nil{return nil,err}
     if err=sqlsplit.Validate(stmts,sqlsplit.MySQL);err!=nil{return nil,err}
     if len(stmts)==0{return nil,errors.New("migration contains no SQL statements")}
-    // MySQL DDL can implicitly commit. Do not imply that a failed script can be fully rolled back.
     last:=0
     for _,st:=range stmts{
         if _,err=m.DB.ExecContext(ctx,st.SQL);err!=nil{return nil,&StatementError{Index:st.Index,LastSuccessful:last,Err:err}}
         last=st.Index
     }
-    // History write is best-effort atomic only relative to itself, not the DDL above.
     _,err=m.DB.ExecContext(ctx,`CREATE TABLE IF NOT EXISTS _dbmp_schema_history (
       run_id BIGINT PRIMARY KEY, migration_id BIGINT NOT NULL, version INT NOT NULL,
       checksum VARBINARY(32) NOT NULL, applied_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
