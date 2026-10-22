@@ -67,6 +67,16 @@ func NewPostgresTarget(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// MySQLTarget adalah parameter koneksi database MySQL target segar (seed
+// diketahui test) untuk driver dbms/mysql.
+type MySQLTarget struct {
+	Host     string
+	Port     int
+	User     string
+	Password string
+	Database string
+}
+
 // NewMySQLTarget mengembalikan koneksi ke database MySQL target segar dengan
 // schema seed yang diketahui test (tabel customers dan orders).
 func NewMySQLTarget(t *testing.T) *sql.DB {
@@ -75,26 +85,52 @@ func NewMySQLTarget(t *testing.T) *sql.DB {
 		return openMySQL(t, dsn)
 	}
 
+	cfg := MySQLTargetConfig(t)
+	db := openMySQL(t, mysqlDSN(cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.Database))
+	t.Cleanup(func() { _ = db.Close() })
+	return db
+}
+
+// MySQLTargetConfig mengembalikan parameter koneksi (bukan *sql.DB) sehingga
+// test driver dbms/mysql bisa membuka koneksi lewat Driver.Open.
+func MySQLTargetConfig(t *testing.T) MySQLTarget {
+	t.Helper()
+	if dsn := os.Getenv("TEST_MYSQL_URL"); dsn != "" {
+		// ponytail: fallback TEST_MYSQL_URL dipakai apa adanya oleh
+		// NewMySQLTarget; Driver.Open test tidak didukung di jalur ini.
+		t.Skip("TEST_MYSQL_URL tidak menyediakan parameter host/port untuk Driver.Open")
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), startTimeout)
 	defer cancel()
 	host, port := mysqlCluster(t, ctx)
 
 	name := uniqueName("t")
 	// multiStatements: seed dieksekusi sebagai satu blob SQL berisi banyak statement.
-	root := openMySQL(t, fmt.Sprintf("%s:%s@tcp(%s:%s)/mysql?parseTime=true&multiStatements=true", "root", mysqlRootPass, host, port))
+	root := openMySQL(t, mysqlDSN(host, portInt(port), "root", mysqlRootPass, "mysql")+"&multiStatements=true")
 	defer func() { _ = root.Close() }()
 	if _, err := root.ExecContext(ctx, "CREATE DATABASE `"+name+"`"); err != nil {
 		t.Fatalf("create database %s: %v", name, err)
 	}
 
-	db := openMySQL(t, fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&multiStatements=true", "root", mysqlRootPass, host, port, name))
+	db := openMySQL(t, mysqlDSN(host, portInt(port), "root", mysqlRootPass, name)+"&multiStatements=true")
+	defer func() { _ = db.Close() }()
 	if mysqlTargetSchema != "" {
 		if _, err := db.ExecContext(ctx, mysqlTargetSchema); err != nil {
 			t.Fatalf("seed schema mysql: %v", err)
 		}
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
+	return MySQLTarget{Host: host, Port: portInt(port), User: "root", Password: mysqlRootPass, Database: name}
+}
+
+func mysqlDSN(host string, port int, user, pass, database string) string {
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&timeout=10s", user, pass, host, port, database)
+}
+
+func portInt(port string) int {
+	var n int
+	_, _ = fmt.Sscanf(port, "%d", &n)
+	return n
 }
 
 func newPostgresDatabase(t *testing.T, schema string) *pgxpool.Pool {

@@ -89,6 +89,10 @@ CREATE TABLE orders (
 
 CREATE INDEX idx_orders_ordered_at ON orders (ordered_at);
 
+CREATE TABLE long_cells (
+    v LONGTEXT NULL
+) ENGINE = InnoDB;
+
 INSERT INTO customers (name, email, city)
 VALUES ('Andi', 'andi@example.com', 'Bandung'),
        ('Budi', 'budi@example.com', NULL),
@@ -105,4 +109,7 @@ VALUES (1, 'paid', 120000.00, '2026-01-01 10:00:00'),
        (2, 'paid', 91000.00, '2026-01-08 13:30:00'),
        (3, 'pending', 77000.00, '2026-01-09 14:45:00'),
        (1, 'shipped', 165000.00, '2026-01-10 15:00:00');
+
+INSERT INTO long_cells (v)
+VALUES (REPEAT('x', 1000));
 `
