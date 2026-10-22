@@ -1,0 +1,31 @@
+/api/openapi.yaml                         @miguelsinaga @EDO_GITHUB @RHINO_GITHUB
+/backend/internal/platformdb/migrations/  @miguelsinaga @EDO_GITHUB @RHINO_GITHUB
+/backend/internal/dbms/*.go               @EDO_GITHUB @RHINO_GITHUB
+
+/backend/cmd/                             @miguelsinaga
+/backend/internal/config/                 @miguelsinaga
+/backend/internal/httpx/                  @miguelsinaga
+/backend/internal/apperr/                 @miguelsinaga
+/backend/internal/auth/                   @miguelsinaga
+/backend/internal/authz/                  @miguelsinaga
+/backend/internal/admin/                  @miguelsinaga
+/backend/internal/audit/                  @miguelsinaga
+/frontend/src/app/                        @miguelsinaga
+/frontend/src/lib/api/                    @miguelsinaga
+/frontend/src/features/auth/              @miguelsinaga
+/frontend/src/features/admin/             @miguelsinaga
+/.github/                                 @miguelsinaga
+
+/backend/internal/secret/                 @EDO_GITHUB
+/backend/internal/dbconn/                 @EDO_GITHUB
+/backend/internal/schema/                 @EDO_GITHUB
+/backend/internal/explorer/               @EDO_GITHUB
+/backend/internal/schemadiff/             @EDO_GITHUB
+/backend/internal/testutil/               @EDO_GITHUB
+/frontend/src/features/connections/       @EDO_GITHUB
+/frontend/src/features/explorer/          @EDO_GITHUB
+/frontend/src/features/schema-diff/       @EDO_GITHUB
+/deploy/                                  @EDO_GITHUB
+
+/backend/internal/migration/              @RHINO_GITHUB
+/frontend/src/features/migrations/        @RHINO_GITHUB
