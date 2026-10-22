@@ -188,7 +188,8 @@ func postgresCluster(t *testing.T, ctx context.Context) string {
 			Image:        postgresImage,
 			Env:          map[string]string{"POSTGRES_USER": pgUser, "POSTGRES_PASSWORD": pgPassword, "POSTGRES_DB": "postgres"},
 			ExposedPorts: []string{"5432/tcp"},
-			WaitingFor: wait.ForListeningPort("5432/tcp").
+			WaitingFor: wait.ForLog("database system is ready to accept connections").
+				WithOccurrence(2).
 				WithStartupTimeout(startTimeout),
 		}
 		c, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{ContainerRequest: req, Started: true})

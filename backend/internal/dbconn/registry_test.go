@@ -49,22 +49,22 @@ func (d *fakeDriver) Open(context.Context, dbms.ConnConfig) (dbms.Conn, error) {
 }
 
 type fakeStore struct {
-	rows map[int64]dbconn.Connection
+	rows map[int64]dbconn.TargetCredentials
 	err  error
 }
 
-func (s fakeStore) GetConnection(context.Context, int64) (dbconn.Connection, error) {
+func (s fakeStore) GetConnection(context.Context, int64) (dbconn.TargetCredentials, error) {
 	if s.err != nil {
-		return dbconn.Connection{}, s.err
+		return dbconn.TargetCredentials{}, s.err
 	}
-	var out dbconn.Connection
+	var out dbconn.TargetCredentials
 	for _, r := range s.rows {
 		out = r
 	}
 	return out, nil
 }
 
-func newRegistry(t *testing.T, store dbconn.Store, driver dbms.Driver) *dbconn.Registry {
+func newRegistry(t *testing.T, store dbconn.RegistryStore, driver dbms.Driver) *dbconn.Registry {
 	t.Helper()
 	cipher, err := secret.New(testKey)
 	require.NoError(t, err)
@@ -75,11 +75,11 @@ func newRegistry(t *testing.T, store dbconn.Store, driver dbms.Driver) *dbconn.R
 	}
 }
 
-func row(t *testing.T, id int64) dbconn.Connection {
+func row(t *testing.T, id int64) dbconn.TargetCredentials {
 	t.Helper()
 	cipher, err := secret.New(testKey)
 	require.NoError(t, err)
-	return dbconn.Connection{
+	return dbconn.TargetCredentials{
 		ID:                 id,
 		Name:               "inventory",
 		Kind:               "fake",
@@ -95,7 +95,7 @@ func row(t *testing.T, id int64) dbconn.Connection {
 
 func TestGetCachesConnection(t *testing.T) {
 	driver := &fakeDriver{}
-	store := fakeStore{rows: map[int64]dbconn.Connection{7: row(t, 7)}}
+	store := fakeStore{rows: map[int64]dbconn.TargetCredentials{7: row(t, 7)}}
 	reg := newRegistry(t, store, driver)
 
 	ctx := context.Background()
@@ -110,7 +110,7 @@ func TestGetCachesConnection(t *testing.T) {
 
 func TestGetIsConcurrencySafe(t *testing.T) {
 	driver := &fakeDriver{}
-	store := fakeStore{rows: map[int64]dbconn.Connection{7: row(t, 7)}}
+	store := fakeStore{rows: map[int64]dbconn.TargetCredentials{7: row(t, 7)}}
 	reg := newRegistry(t, store, driver)
 
 	var wg sync.WaitGroup
@@ -134,7 +134,7 @@ func TestGetIsConcurrencySafe(t *testing.T) {
 
 func TestInvalidateClosesAndReopens(t *testing.T) {
 	driver := &fakeDriver{}
-	store := fakeStore{rows: map[int64]dbconn.Connection{7: row(t, 7)}}
+	store := fakeStore{rows: map[int64]dbconn.TargetCredentials{7: row(t, 7)}}
 	reg := newRegistry(t, store, driver)
 
 	first, err := reg.Get(context.Background(), 7)
@@ -157,7 +157,7 @@ func TestGetNotFound(t *testing.T) {
 
 func TestGetFailedOpenIsNotCached(t *testing.T) {
 	driver := &fakeDriver{err: errors.New("koneksi ditolak")}
-	store := fakeStore{rows: map[int64]dbconn.Connection{7: row(t, 7)}}
+	store := fakeStore{rows: map[int64]dbconn.TargetCredentials{7: row(t, 7)}}
 	reg := newRegistry(t, store, driver)
 
 	_, err := reg.Get(context.Background(), 7)
@@ -170,7 +170,7 @@ func TestGetFailedOpenIsNotCached(t *testing.T) {
 
 func TestCloseClosesEverything(t *testing.T) {
 	driver := &fakeDriver{}
-	store := fakeStore{rows: map[int64]dbconn.Connection{7: row(t, 7)}}
+	store := fakeStore{rows: map[int64]dbconn.TargetCredentials{7: row(t, 7)}}
 	reg := newRegistry(t, store, driver)
 
 	conn, err := reg.Get(context.Background(), 7)
@@ -184,7 +184,7 @@ func TestDecryptFailureDoesNotLeakPassword(t *testing.T) {
 	bad := row(t, 7)
 	bad.PasswordCiphertext = []byte("bukan-gcm")
 	driver := &fakeDriver{}
-	reg := newRegistry(t, fakeStore{rows: map[int64]dbconn.Connection{7: bad}}, driver)
+	reg := newRegistry(t, fakeStore{rows: map[int64]dbconn.TargetCredentials{7: bad}}, driver)
 
 	_, err := reg.Get(context.Background(), 7)
 	require.Error(t, err)

@@ -76,8 +76,8 @@ func TestTruncatedBlobFails(t *testing.T) {
 
 func TestNewRejectsBadKey(t *testing.T) {
 	for name, k := range map[string]string{
-		"bukan base64": "!!bukan-base64!!",
-		"terlalu pendek": base64.StdEncoding.EncodeToString([]byte("pendek")),
+		"bukan base64":    "!!bukan-base64!!",
+		"terlalu pendek":  base64.StdEncoding.EncodeToString([]byte("pendek")),
 		"terlalu panjang": base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{9}, 64)),
 	} {
 		t.Run(name, func(t *testing.T) {

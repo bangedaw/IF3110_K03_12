@@ -4,7 +4,10 @@
 package apigen
 
 import (
+	"encoding/json"
 	"time"
+
+	"github.com/oapi-codegen/runtime"
 )
 
 const (
@@ -15,6 +18,12 @@ const (
 const (
 	Edit AccessLevel = "edit"
 	View AccessLevel = "view"
+)
+
+// Defines values for DBMSKind.
+const (
+	Mysql    DBMSKind = "mysql"
+	Postgres DBMSKind = "postgres"
 )
 
 // Defines values for ProblemCode.
@@ -32,6 +41,14 @@ const (
 	VALIDATIONFAILED ProblemCode = "VALIDATION_FAILED"
 )
 
+// Defines values for SSLMode.
+const (
+	Disable    SSLMode = "disable"
+	Require    SSLMode = "require"
+	VerifyCa   SSLMode = "verify-ca"
+	VerifyFull SSLMode = "verify-full"
+)
+
 // AccessLevel defines model for AccessLevel.
 type AccessLevel string
 
@@ -39,6 +56,77 @@ type AccessLevel string
 type AuthSession struct {
 	CsrfToken string `json:"csrfToken"`
 	User      User   `json:"user"`
+}
+
+// ConnectionTestResult defines model for ConnectionTestResult.
+type ConnectionTestResult struct {
+	Detail    *string `json:"detail,omitempty"`
+	LatencyMs int64   `json:"latencyMs"`
+	Ok        bool    `json:"ok"`
+}
+
+// DBMSKind defines model for DBMSKind.
+type DBMSKind string
+
+// DatabaseConnection Password tidak pernah dikembalikan; `hasPassword` hanya menandai ada/tidak.
+type DatabaseConnection struct {
+	CreatedAt    time.Time `json:"createdAt"`
+	CreatedById  *int64    `json:"createdById"`
+	DatabaseName string    `json:"databaseName"`
+	HasPassword  bool      `json:"hasPassword"`
+	Host         string    `json:"host"`
+	Id           int64     `json:"id"`
+	IsActive     bool      `json:"isActive"`
+	Kind         DBMSKind  `json:"kind"`
+	Name         string    `json:"name"`
+	Port         int       `json:"port"`
+	SslMode      SSLMode   `json:"sslMode"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+	Username     string    `json:"username"`
+}
+
+// DatabaseConnectionCreate defines model for DatabaseConnectionCreate.
+type DatabaseConnectionCreate struct {
+	DatabaseName string   `json:"databaseName"`
+	Host         string   `json:"host"`
+	IsActive     *bool    `json:"isActive,omitempty"`
+	Kind         DBMSKind `json:"kind"`
+	Name         string   `json:"name"`
+	Password     string   `json:"password"`
+	Port         int      `json:"port"`
+	SslMode      *SSLMode `json:"sslMode,omitempty"`
+	Username     string   `json:"username"`
+}
+
+// DatabaseConnectionPage defines model for DatabaseConnectionPage.
+type DatabaseConnectionPage struct {
+	Items  []DatabaseConnection `json:"items"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+	Total  int64                `json:"total"`
+}
+
+// DatabaseConnectionTestRequest Kredensial untuk diuji; bisa dari form tambah atau koneksi tersimpan.
+type DatabaseConnectionTestRequest struct {
+	union json.RawMessage
+}
+
+// DatabaseConnectionTestRequest1 defines model for .
+type DatabaseConnectionTestRequest1 struct {
+	DatabaseId int64 `json:"databaseId"`
+}
+
+// DatabaseConnectionUpdate Field yang tidak dikirim tidak diubah. Password kosong berarti tidak diubah.
+type DatabaseConnectionUpdate struct {
+	DatabaseName *string   `json:"databaseName,omitempty"`
+	Host         *string   `json:"host,omitempty"`
+	IsActive     *bool     `json:"isActive,omitempty"`
+	Kind         *DBMSKind `json:"kind,omitempty"`
+	Name         *string   `json:"name,omitempty"`
+	Password     *string   `json:"password,omitempty"`
+	Port         *int      `json:"port,omitempty"`
+	SslMode      *SSLMode  `json:"sslMode,omitempty"`
+	Username     *string   `json:"username,omitempty"`
 }
 
 // Grant defines model for Grant.
@@ -117,6 +205,9 @@ type Problem struct {
 // ProblemCode Kode error aplikasi
 type ProblemCode string
 
+// SSLMode defines model for SSLMode.
+type SSLMode string
+
 // User defines model for User.
 type User struct {
 	CreatedAt       time.Time `json:"createdAt"`
@@ -169,6 +260,9 @@ type UserId = int64
 // Conflict defines model for Conflict.
 type Conflict = Problem
 
+// DBUnreachable defines model for DBUnreachable.
+type DBUnreachable = Problem
+
 // Forbidden defines model for Forbidden.
 type Forbidden = Problem
 
@@ -181,6 +275,12 @@ type Unauthenticated = Problem
 // ValidationFailed defines model for ValidationFailed.
 type ValidationFailed = Problem
 
+// GetApiAdminDatabasesParams defines parameters for GetApiAdminDatabases.
+type GetApiAdminDatabasesParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // GetApiAdminGroupsParams defines parameters for GetApiAdminGroups.
 type GetApiAdminGroupsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
@@ -192,6 +292,15 @@ type GetApiAdminUsersParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// PostApiAdminDatabasesJSONRequestBody defines body for PostApiAdminDatabases for application/json ContentType.
+type PostApiAdminDatabasesJSONRequestBody = DatabaseConnectionCreate
+
+// PostApiAdminDatabasesTestJSONRequestBody defines body for PostApiAdminDatabasesTest for application/json ContentType.
+type PostApiAdminDatabasesTestJSONRequestBody = DatabaseConnectionTestRequest
+
+// PatchApiAdminDatabasesDatabaseIdJSONRequestBody defines body for PatchApiAdminDatabasesDatabaseId for application/json ContentType.
+type PatchApiAdminDatabasesDatabaseIdJSONRequestBody = DatabaseConnectionUpdate
 
 // PostApiAdminGroupsJSONRequestBody defines body for PostApiAdminGroups for application/json ContentType.
 type PostApiAdminGroupsJSONRequestBody = GroupCreate
@@ -213,3 +322,65 @@ type PostApiAdminUsersUserIdPasswordJSONRequestBody = PasswordReset
 
 // PostApiAuthLoginJSONRequestBody defines body for PostApiAuthLogin for application/json ContentType.
 type PostApiAuthLoginJSONRequestBody = LoginRequest
+
+// AsDatabaseConnectionCreate returns the union data inside the DatabaseConnectionTestRequest as a DatabaseConnectionCreate
+func (t DatabaseConnectionTestRequest) AsDatabaseConnectionCreate() (DatabaseConnectionCreate, error) {
+	var body DatabaseConnectionCreate
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDatabaseConnectionCreate overwrites any union data inside the DatabaseConnectionTestRequest as the provided DatabaseConnectionCreate
+func (t *DatabaseConnectionTestRequest) FromDatabaseConnectionCreate(v DatabaseConnectionCreate) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDatabaseConnectionCreate performs a merge with any union data inside the DatabaseConnectionTestRequest, using the provided DatabaseConnectionCreate
+func (t *DatabaseConnectionTestRequest) MergeDatabaseConnectionCreate(v DatabaseConnectionCreate) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsDatabaseConnectionTestRequest1 returns the union data inside the DatabaseConnectionTestRequest as a DatabaseConnectionTestRequest1
+func (t DatabaseConnectionTestRequest) AsDatabaseConnectionTestRequest1() (DatabaseConnectionTestRequest1, error) {
+	var body DatabaseConnectionTestRequest1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDatabaseConnectionTestRequest1 overwrites any union data inside the DatabaseConnectionTestRequest as the provided DatabaseConnectionTestRequest1
+func (t *DatabaseConnectionTestRequest) FromDatabaseConnectionTestRequest1(v DatabaseConnectionTestRequest1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDatabaseConnectionTestRequest1 performs a merge with any union data inside the DatabaseConnectionTestRequest, using the provided DatabaseConnectionTestRequest1
+func (t *DatabaseConnectionTestRequest) MergeDatabaseConnectionTestRequest1(v DatabaseConnectionTestRequest1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DatabaseConnectionTestRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DatabaseConnectionTestRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}

@@ -9,9 +9,9 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
 )
 
-// Connection adalah baris database_connections yang dibutuhkan registry
-// (tanpa kolom yang tidak relevan untuk membuka koneksi).
-type Connection struct {
+// TargetCredentials adalah baris database_connections yang dibutuhkan
+// registry untuk membuka koneksi (tanpa kolom yang tidak relevan).
+type TargetCredentials struct {
 	ID                 int64
 	Name               string
 	Kind               string
@@ -24,16 +24,16 @@ type Connection struct {
 	IsActive           bool
 }
 
-// Store adalah akses data koneksi dari platform DB; diwujudkan oleh sqlc di
-// tugas berikutnya dan dipalsukan di test.
-type Store interface {
-	GetConnection(ctx context.Context, id int64) (Connection, error)
+// RegistryStore adalah akses data koneksi dari platform DB yang dibutuhkan
+// registry; diwujudkan oleh SQLStore dan dipalsukan di test.
+type RegistryStore interface {
+	GetConnection(ctx context.Context, id int64) (TargetCredentials, error)
 }
 
 // Registry membuka dan menyimpan koneksi (pool) ke database target per ID,
 // dengan invalidasi saat koneksi diubah/dihapus.
 type Registry struct {
-	Store   Store
+	Store   RegistryStore
 	Cipher  *secret.Cipher
 	Drivers func(kind string) (dbms.Driver, bool)
 
@@ -47,7 +47,7 @@ type entry struct {
 	err  error
 }
 
-func NewRegistry(store Store, cipher *secret.Cipher) *Registry {
+func NewRegistry(store RegistryStore, cipher *secret.Cipher) *Registry {
 	return &Registry{
 		Store:   store,
 		Cipher:  cipher,
