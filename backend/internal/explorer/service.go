@@ -4,7 +4,12 @@ package explorer
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
@@ -19,10 +24,14 @@ import (
 // pagination bila jumlah koneksi mendekati itu.
 const listLimit = 500
 
-// Store adalah subset akses koneksi dari dbconn.Store yang dipakai explorer.
+// Store adalah subset akses data dari dbconn.Store yang dipakai explorer.
 type Store interface {
 	ListConnections(ctx context.Context, limit, offset int32) ([]gen.DatabaseConnection, error)
 	GetConnectionByID(ctx context.Context, id int64) (gen.DatabaseConnection, error)
+
+	CreateSnapshot(ctx context.Context, arg gen.CreateSnapshotParams) (gen.SchemaSnapshot, error)
+	ListSnapshots(ctx context.Context, databaseID int64) ([]gen.SchemaSnapshot, error)
+	GetSnapshotByID(ctx context.Context, id, databaseID int64) (gen.SchemaSnapshot, error)
 }
 
 type Service struct {
@@ -50,6 +59,17 @@ type DatabaseDetail struct {
 	Port         int    `json:"port"`
 	DatabaseName string `json:"databaseName"`
 	SSLMode      string `json:"sslMode"`
+}
+
+// Snapshot adalah snapshot schema tersimpan (hasil Inspector.Snapshot saat
+// diambil); dipakai sebagai sumber pembanding pada schema diff.
+type Snapshot struct {
+	ID             int64         `json:"id"`
+	DatabaseID     int64         `json:"databaseId"`
+	MigrationRunID *int64        `json:"migrationRunId,omitempty"`
+	TakenBy        *int64        `json:"takenBy,omitempty"`
+	TakenAt        time.Time     `json:"takenAt"`
+	Model          *schema.Model `json:"model"`
 }
 
 // Databases: hanya koneksi aktif yang EffectiveLevel user bukan none.
@@ -170,6 +190,86 @@ func (s *Service) Rows(ctx context.Context, p authz.Principal, id int64, q dbms.
 		return nil, mapTargetErr(err)
 	}
 	return page, nil
+}
+
+// CreateSnapshot mengambil schema terkini dari target hidup lalu menyimpannya.
+func (s *Service) CreateSnapshot(ctx context.Context, p authz.Principal, databaseID int64) (*Snapshot, error) {
+	conn, err := s.target(ctx, p, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	model, err := conn.Inspector().Snapshot(ctx)
+	if err != nil {
+		return nil, mapTargetErr(err)
+	}
+	raw, err := json.Marshal(model)
+	if err != nil {
+		return nil, err
+	}
+	row, err := s.store.CreateSnapshot(ctx, gen.CreateSnapshotParams{
+		DatabaseID: databaseID,
+		TakenBy:    pgtype.Int8{Int64: p.UserID, Valid: true},
+		Model:      raw,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return toSnapshot(row)
+}
+
+// Snapshots: daftar snapshot tersimpan; koneksi hidup tidak diperlukan.
+func (s *Service) Snapshots(ctx context.Context, p authz.Principal, databaseID int64) ([]Snapshot, error) {
+	if err := s.az.Authorize(ctx, p, authz.ActionDBView, authz.Resource{DatabaseID: databaseID}); err != nil {
+		return nil, err
+	}
+	rows, err := s.store.ListSnapshots(ctx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	out := []Snapshot{}
+	for _, row := range rows {
+		snap, err := toSnapshot(row)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *snap)
+	}
+	return out, nil
+}
+
+// Snapshot mengambil satu snapshot; terkunci pada databaseID agar snapshot
+// database lain tidak bisa dibaca lewat id (cross-database -> 404).
+func (s *Service) Snapshot(ctx context.Context, p authz.Principal, databaseID, snapshotID int64) (*Snapshot, error) {
+	if err := s.az.Authorize(ctx, p, authz.ActionDBView, authz.Resource{DatabaseID: databaseID}); err != nil {
+		return nil, err
+	}
+	row, err := s.store.GetSnapshotByID(ctx, snapshotID, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	return toSnapshot(row)
+}
+
+func toSnapshot(row gen.SchemaSnapshot) (*Snapshot, error) {
+	m := &schema.Model{}
+	if err := json.Unmarshal(row.Model, m); err != nil {
+		return nil, fmt.Errorf("model snapshot id %d tidak terbaca: %w", row.ID, err)
+	}
+	out := &Snapshot{
+		ID:         row.ID,
+		DatabaseID: row.DatabaseID,
+		TakenAt:    row.TakenAt.Time,
+		Model:      m,
+	}
+	if row.MigrationRunID.Valid {
+		v := row.MigrationRunID.Int64
+		out.MigrationRunID = &v
+	}
+	if row.TakenBy.Valid {
+		v := row.TakenBy.Int64
+		out.TakenBy = &v
+	}
+	return out, nil
 }
 
 // mapTargetErr memetakan kegagalan sisi database target:

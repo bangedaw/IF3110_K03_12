@@ -75,6 +75,23 @@ func (s *SQLStore) GetConnection(ctx context.Context, id int64) (TargetCredentia
 	}, nil
 }
 
+// --- snapshot schema (dipakai explorer; satu SQLStore untuk dua service) ---
+
+func (s *SQLStore) CreateSnapshot(ctx context.Context, arg gen.CreateSnapshotParams) (gen.SchemaSnapshot, error) {
+	row, err := s.Q.CreateSnapshot(ctx, arg)
+	return row, mapErr(err)
+}
+
+func (s *SQLStore) ListSnapshots(ctx context.Context, databaseID int64) ([]gen.SchemaSnapshot, error) {
+	rows, err := s.Q.ListSnapshots(ctx, databaseID)
+	return rows, mapErr(err)
+}
+
+func (s *SQLStore) GetSnapshotByID(ctx context.Context, id, databaseID int64) (gen.SchemaSnapshot, error) {
+	row, err := s.Q.GetSnapshotByID(ctx, gen.GetSnapshotByIDParams{ID: id, DatabaseID: databaseID})
+	return row, mapErr(err)
+}
+
 const (
 	pgUniqueViolation = "23505"
 )

@@ -260,6 +260,17 @@ type ExplorerRowsPage struct {
 	TotalEstimate int64            `json:"totalEstimate"`
 }
 
+// ExplorerSchemaModel Model kanonik seluruh schema sebuah database (hasil normalisasi)
+type ExplorerSchemaModel struct {
+	Schemas []ExplorerSchemaObject `json:"schemas"`
+}
+
+// ExplorerSchemaObject defines model for ExplorerSchemaObject.
+type ExplorerSchemaObject struct {
+	Name   string          `json:"name"`
+	Tables []ExplorerTable `json:"tables"`
+}
+
 // ExplorerTable defines model for ExplorerTable.
 type ExplorerTable struct {
 	Columns     *[]ExplorerColumn     `json:"columns,omitempty"`
@@ -369,6 +380,18 @@ type SSLMode string
 // SchemaNameList defines model for SchemaNameList.
 type SchemaNameList = []string
 
+// SchemaSnapshot defines model for SchemaSnapshot.
+type SchemaSnapshot struct {
+	DatabaseId     int64  `json:"databaseId"`
+	Id             int64  `json:"id"`
+	MigrationRunId *int64 `json:"migrationRunId,omitempty"`
+
+	// Model Model kanonik seluruh schema sebuah database (hasil normalisasi)
+	Model   ExplorerSchemaModel `json:"model"`
+	TakenAt time.Time           `json:"takenAt"`
+	TakenBy *int64              `json:"takenBy,omitempty"`
+}
+
 // User defines model for User.
 type User struct {
 	CreatedAt       time.Time `json:"createdAt"`
@@ -423,6 +446,9 @@ type OrderDir string
 
 // SchemaName defines model for SchemaName.
 type SchemaName = string
+
+// SnapshotId defines model for SnapshotId.
+type SnapshotId = int64
 
 // TableName defines model for TableName.
 type TableName = string

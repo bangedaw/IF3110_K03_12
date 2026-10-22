@@ -501,6 +501,50 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '503': { $ref: '#/components/responses/DBUnreachable' }
 
+  /api/databases/{databaseId}/snapshots:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    get:
+      tags: [explorer]
+      summary: Daftar snapshot schema tersimpan untuk database ini
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SchemaSnapshot' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [explorer]
+      summary: Ambil snapshot schema terkini dari target hidup lalu simpan
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchemaSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+  /api/databases/{databaseId}/snapshots/{snapshotId}:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+      - $ref: '#/components/parameters/SnapshotId'
+    get:
+      tags: [explorer]
+      summary: Ambil satu snapshot (terkunci pada database; lintas database -> 404)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchemaSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -555,6 +599,11 @@ components:
       name: orderDir
       in: query
       schema: { type: string, enum: [asc, desc], default: asc }
+    SnapshotId:
+      name: snapshotId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
 
   responses:
     Unauthenticated:
@@ -897,4 +946,26 @@ components:
         totalEstimate: { type: integer, format: int64 }
         limit: { type: integer, maximum: 200 }
         offset: { type: integer }
+    ExplorerSchemaObject:
+      type: object
+      required: [name, tables]
+      properties:
+        name: { type: string }
+        tables: { type: array, items: { $ref: '#/components/schemas/ExplorerTable' } }
+    ExplorerSchemaModel:
+      description: Model kanonik seluruh schema sebuah database (hasil normalisasi)
+      type: object
+      required: [schemas]
+      properties:
+        schemas: { type: array, items: { $ref: '#/components/schemas/ExplorerSchemaObject' } }
+    SchemaSnapshot:
+      type: object
+      required: [id, databaseId, takenAt, model]
+      properties:
+        id: { type: integer, format: int64 }
+        databaseId: { type: integer, format: int64 }
+        migrationRunId: { type: integer, format: int64 }
+        takenBy: { type: integer, format: int64 }
+        takenAt: { type: string, format: date-time }
+        model: { $ref: '#/components/schemas/ExplorerSchemaModel' }
 
