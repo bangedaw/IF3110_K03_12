@@ -302,6 +302,9 @@ func (s *Service) SchemaDiff(ctx context.Context, p authz.Principal, databaseID 
 		return nil, err
 	}
 
+	// MySQL: "schema" = nama database, jadi diff dua koneksi dengan nama
+	// database berbeda disetarakan dulu agar dibandingkan per objek.
+	schemadiff.AlignModels(current, target)
 	changes := schemadiff.Diff(current, target)
 	if changes == nil {
 		changes = []schemadiff.Change{}

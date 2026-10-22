@@ -46,20 +46,22 @@ func (Driver) Open(ctx context.Context, cfg dbms.ConnConfig) (dbms.Conn, error) 
 		_ = db.Close()
 		return nil, sanitize(cfg, err)
 	}
-	return &Conn{db: db}, nil
+	return &Conn{db: db, database: cfg.Database}, nil
 }
 
 // Conn memegang pool database/sql (driver go-sql-driver) ke satu target.
 type Conn struct {
 	db *sql.DB
+	// database: tujuan koneksi; satu-satunya "schema" yang terlihat.
+	database string
 }
 
 func (c *Conn) Ping(ctx context.Context) error { return c.db.PingContext(ctx) }
 
 func (c *Conn) Close() error { return c.db.Close() }
 
-func (c *Conn) Inspector() dbms.Inspector { return &Inspector{db: c.db} }
-func (c *Conn) Browser() dbms.DataBrowser { return &Browser{db: c.db} }
+func (c *Conn) Inspector() dbms.Inspector { return &Inspector{db: c.db, database: c.database} }
+func (c *Conn) Browser() dbms.DataBrowser { return &Browser{db: c.db, database: c.database} }
 
 // TODO(rhino): ganti dengan Migrator asli saat migrator.go masuk.
 // MySQL: DDL implicit commit, tidak transaksional.

@@ -61,6 +61,25 @@ type Change struct {
 	Index      *schema.Index      `json:"index,omitempty"`
 }
 
+// AlignModels menyetarakan nama skema tunggal pada dua model. Kasus MySQL:
+// "schema" = nama database, sehingga diff antar dua database dengan nama
+// berbeda akan terlihat sebagai drop+add seluruh skema (tanpa arti). Bila
+// kedua model punya tepat satu skema dengan nama berbeda, skema b di-rename
+// menjadi nama skema a agar perbandingan terjadi per objek. Model multi-skema
+// (PostgreSQL: app + public) tidak disentuh.
+func AlignModels(a, b *schema.Model) {
+	if a == nil || b == nil || len(a.Schemas) != 1 || len(b.Schemas) != 1 {
+		return
+	}
+	if a.Schemas[0].Name == b.Schemas[0].Name {
+		return
+	}
+	b.Schemas[0].Name = a.Schemas[0].Name
+	for i := range b.Schemas[0].Tables {
+		b.Schemas[0].Tables[i].Schema = a.Schemas[0].Name
+	}
+}
+
 // Diff membandingkan baseline (a) dengan current (b). Keduanya boleh nil.
 // Hasil diurutkan deterministik: per jenis perubahan, lalu skema/tabel/nama.
 func Diff(a, b *schema.Model) []Change {

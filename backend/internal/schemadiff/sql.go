@@ -42,23 +42,14 @@ const (
 // tertentu. Urutan pernyataan mengikuti urutan eksekusi aman di atas, bukan
 // urutan masuknya perubahan.
 func Generate(dialect string, changes []Change) (Result, error) {
-	if dialect != "postgres" {
+	var g generator
+	switch dialect {
+	case "postgres":
+		g = newPgGen(changes)
+	case "mysql":
+		g = newMySQLGen(changes)
+	default:
 		return Result{}, fmt.Errorf("%w: %q", ErrUnsupportedDialect, dialect)
-	}
-
-	g := pgGen{autoIndex: map[string]bool{}}
-	// Index yang namanya sama dengan constraint yang ikut dipasang adalah
-	// index milik constraint (PK/UNIQUE): PG membuatnya otomatis, jadi
-	// CREATE INDEX untuk namanya pasti gagal "sudah ada".
-	for _, c := range changes {
-		if c.Kind == KindAddConstraint && c.Constraint != nil {
-			g.autoIndex[indexKey(c.Schema, c.Table, c.Name)] = true
-		}
-		if c.Kind == KindAddTable && c.TableDef != nil {
-			for _, cs := range c.TableDef.Constraints {
-				g.autoIndex[indexKey(c.Schema, c.Table, cs.Name)] = true
-			}
-		}
 	}
 
 	// Buckets per fase; stable agar deterministik.
@@ -79,6 +70,12 @@ func Generate(dialect string, changes []Change) (Result, error) {
 	return out, nil
 }
 
+// generator adalah backend per-dialek.
+type generator interface {
+	statements(c Change) []stmt
+	warnings(c Change) []string
+}
+
 func indexKey(schemaName, table, index string) string {
 	return schemaName + "\x00" + table + "\x00" + index
 }
@@ -89,6 +86,24 @@ type stmt struct {
 }
 
 type pgGen struct{ autoIndex map[string]bool }
+
+// newPgGen membangun pre-scan: index yang namanya sama dengan constraint yang
+// ikut dipasang adalah index milik constraint (PK/UNIQUE) — PG membuatnya
+// otomatis, jadi CREATE INDEX untuk namanya pasti gagal "sudah ada".
+func newPgGen(changes []Change) *pgGen {
+	g := &pgGen{autoIndex: map[string]bool{}}
+	for _, c := range changes {
+		if c.Kind == KindAddConstraint && c.Constraint != nil {
+			g.autoIndex[indexKey(c.Schema, c.Table, c.Name)] = true
+		}
+		if c.Kind == KindAddTable && c.TableDef != nil {
+			for _, cs := range c.TableDef.Constraints {
+				g.autoIndex[indexKey(c.Schema, c.Table, cs.Name)] = true
+			}
+		}
+	}
+	return g
+}
 
 // statements memetakan satu perubahan ke pernyataan + fasesnya.
 func (g pgGen) statements(c Change) []stmt {

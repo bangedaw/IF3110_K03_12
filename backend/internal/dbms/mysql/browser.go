@@ -28,12 +28,15 @@ const (
 
 type Browser struct {
 	db *sql.DB
+	// database: tujuan koneksi; satu-satunya "schema" yang bisa dibaca.
+	database string
 }
 
 var _ dbms.DataBrowser = (*Browser)(nil)
 
 func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, error) {
-	if excludedSchema(q.Schema) {
+	// Sama seperti Inspector: hanya database tujuan koneksi yang terlihat.
+	if q.Schema != b.database || excludedSchema(q.Schema) {
 		return nil, dbms.ErrNotFound
 	}
 	limit, offset, err := normalizePage(q)

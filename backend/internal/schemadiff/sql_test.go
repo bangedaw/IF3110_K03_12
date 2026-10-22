@@ -61,13 +61,15 @@ func TestGenerateGolden(t *testing.T) {
 		[]schema.Index{{Name: "books_author_idx", Definition: "CREATE INDEX books_author_idx ON app.books USING btree (author_id)", Columns: []string{"author_id"}}})
 
 	cases := []struct {
-		name string
-		from *schema.Model
-		to   *schema.Model
+		name    string
+		dialect string
+		from    *schema.Model
+		to      *schema.Model
 	}{
 		{
-			name: "postgres_add_table",
-			from: model(authorsFrom),
+			name:    "postgres_add_table",
+			dialect: schema.KindPostgres,
+			from:    model(authorsFrom),
 			to: model(authorsFrom, table("reviews",
 				[]schema.Column{
 					// identity: PG melaporkan IsIdentity tanpa default.
@@ -85,7 +87,8 @@ func TestGenerateGolden(t *testing.T) {
 				[]schema.Index{{Name: "reviews_book_idx", Definition: "CREATE INDEX reviews_book_idx ON app.reviews USING btree (book_id)", Columns: []string{"book_id"}}})),
 		},
 		{
-			name: "postgres_drop_alter_column",
+			name:    "postgres_drop_alter_column",
+			dialect: schema.KindPostgres,
 			from: model(table("articles",
 				[]schema.Column{
 					column("id", "bigint", false, ""),
@@ -104,8 +107,9 @@ func TestGenerateGolden(t *testing.T) {
 				}, nil, nil)),
 		},
 		{
-			name: "postgres_constraint_index_change",
-			from: model(booksFrom),
+			name:    "postgres_constraint_index_change",
+			dialect: schema.KindPostgres,
+			from:    model(booksFrom),
 			to: model(table("books",
 				[]schema.Column{
 					column("id", "bigint", false, ""),
@@ -124,7 +128,8 @@ func TestGenerateGolden(t *testing.T) {
 			// Semua fase urutan eksekusi: drop FK -> drop index -> drop column
 			// -> drop table -> alter column -> create table -> add column ->
 			// add constraint -> add index -> add FK.
-			name: "postgres_full_order",
+			name:    "postgres_full_order",
+			dialect: schema.KindPostgres,
 			from: model(authorsFrom, booksFrom, table("attachments",
 				[]schema.Column{
 					column("id", "bigint", false, ""),
@@ -179,12 +184,78 @@ func TestGenerateGolden(t *testing.T) {
 					},
 					nil)),
 		},
+		{
+			// Dialek MySQL: RawType mentah (varchar/enum), definisi constraint
+			// dari information_schema (backtick), identity = AUTO_INCREMENT.
+			name:    "mysql_full_order",
+			dialect: schema.KindMySQL,
+			from: model(
+				table("customers",
+					[]schema.Column{
+						{Name: "id", RawType: "bigint", DataType: "bigint", IsIdentity: true, Ordinal: 1},
+						{Name: "name", RawType: "varchar(120)", DataType: "character varying(120)", Ordinal: 2},
+						{Name: "email", RawType: "varchar(190)", DataType: "character varying(190)", Ordinal: 3},
+					},
+					[]schema.Constraint{
+						{Name: "PRIMARY", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (`id`)", Columns: []string{"id"}},
+						{Name: "email", Type: schema.ConstraintUnique, Definition: "UNIQUE (`email`)", Columns: []string{"email"}},
+					},
+					[]schema.Index{
+						{Name: "PRIMARY", Columns: []string{"id"}, Unique: true, Primary: true, Method: "btree"},
+						{Name: "email", Columns: []string{"email"}, Unique: true, Method: "btree"},
+					}),
+				table("orders",
+					[]schema.Column{
+						{Name: "id", RawType: "bigint", DataType: "bigint", IsIdentity: true, Ordinal: 1},
+						{Name: "customer_id", RawType: "bigint", DataType: "bigint", Ordinal: 2},
+						{Name: "status", RawType: "enum('pending','paid')", DataType: "enum('pending','paid')", Default: "pending", Ordinal: 3},
+						{Name: "total", RawType: "decimal(12,2)", DataType: "numeric(12,2)", Default: "0.00", Ordinal: 4},
+						{Name: "city", RawType: "varchar(80)", DataType: "character varying(80)", Nullable: true, Ordinal: 5},
+					},
+					[]schema.Constraint{
+						{Name: "PRIMARY", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (`id`)", Columns: []string{"id"}},
+						{Name: "fk_orders_customer", Type: schema.ConstraintForeignKey,
+							Definition: "FOREIGN KEY (`customer_id`) REFERENCES `app`.`customers` (`id`)",
+							Columns:    []string{"customer_id"}, RefSchema: "app", RefTable: "customers",
+							RefColumns: []string{"id"}, OnDelete: "NO ACTION", OnUpdate: "NO ACTION"},
+					},
+					[]schema.Index{{Name: "idx_orders_city", Columns: []string{"city"}, Method: "btree"}})),
+			to: model(
+				table("customers",
+					[]schema.Column{
+						{Name: "id", RawType: "bigint", DataType: "bigint", IsIdentity: true, Ordinal: 1},
+						// email di-drop, phone ditambah.
+						{Name: "name", RawType: "varchar(120)", DataType: "character varying(120)", Ordinal: 2},
+						{Name: "phone", RawType: "varchar(40)", DataType: "character varying(40)", Nullable: true, Ordinal: 3},
+					},
+					[]schema.Constraint{
+						{Name: "PRIMARY", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (`id`)", Columns: []string{"id"}},
+					},
+					[]schema.Index{{Name: "PRIMARY", Columns: []string{"id"}, Unique: true, Primary: true, Method: "btree"}}),
+				table("orders",
+					[]schema.Column{
+						{Name: "id", RawType: "bigint", DataType: "bigint", IsIdentity: true, Ordinal: 1},
+						// customer_id di-encangkan ke varchar (FK dilepas dulu),
+						// total tipe berubah, city dihapus, note baru.
+						{Name: "customer_id", RawType: "varchar(40)", DataType: "character varying(40)", Nullable: true, Ordinal: 2},
+						{Name: "status", RawType: "enum('pending','paid','shipped')", DataType: "enum('pending','paid','shipped')", Default: "pending", Ordinal: 3},
+						{Name: "total", RawType: "decimal(14,2)", DataType: "numeric(14,2)", Default: "0.00", Ordinal: 4},
+						{Name: "note", RawType: "text", DataType: "text", Nullable: true, Ordinal: 5},
+					},
+					[]schema.Constraint{
+						{Name: "PRIMARY", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (`id`)", Columns: []string{"id"}},
+						// FK baru + check baru.
+						{Name: "chk_total", Type: schema.ConstraintCheck,
+							Definition: "CHECK (`total` >= 0)", Columns: []string{"total"}},
+					},
+					[]schema.Index{{Name: "idx_orders_note", Columns: []string{"note"}, Method: "btree"}})),
+		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			changes := schemadiff.Diff(tc.from, tc.to)
-			got, err := schemadiff.Generate(schema.KindPostgres, changes)
+			got, err := schemadiff.Generate(tc.dialect, changes)
 			require.NoError(t, err)
 
 			var b strings.Builder
@@ -220,6 +291,6 @@ func TestGenerate_EmptyAndUnsupported(t *testing.T) {
 
 	// Dialect yang belum ada generator-nya -> error tegas, bukan SQL kosong
 	// yang dikira "tidak ada perubahan".
-	_, err = schemadiff.Generate(schema.KindMySQL, []schemadiff.Change{{Kind: schemadiff.KindDropTable}})
+	_, err = schemadiff.Generate("sqlite", []schemadiff.Change{{Kind: schemadiff.KindDropTable}})
 	require.ErrorIs(t, err, schemadiff.ErrUnsupportedDialect)
 }

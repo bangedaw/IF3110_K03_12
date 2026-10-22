@@ -1,7 +1,9 @@
 // Inspector membaca information_schema pada database target, bersifat
-// read-only. MySQL tidak punya "schema" terpisah: schema = nama database, dan
-// nama database/kolom/tabel dilewatkan lewat parameter sehingga tidak bisa
-// menyuntik SQL.
+// read-only. MySQL tidak punya "schema" terpisah: schema = nama database tujuan
+// koneksi (DATABASE()); satu koneksi hanya bisa melihat satu database — sama
+// seperti PostgreSQL, di mana satu koneksi terikat pada satu database. Nama
+// database/kolom/tabel dilewatkan lewat parameter sehingga tidak bisa menyuntik
+// SQL.
 package mysql
 
 import (
@@ -17,6 +19,8 @@ import (
 
 type Inspector struct {
 	db *sql.DB
+	// database: satu-satunya "schema" yang terlihat (target koneksi).
+	database string
 }
 
 var _ dbms.Inspector = (*Inspector)(nil)
@@ -30,28 +34,25 @@ func excludedSchema(name string) bool {
 	return false
 }
 
-const listSchemasSQL = `
-SELECT SCHEMA_NAME
-FROM information_schema.SCHEMATA
-WHERE SCHEMA_NAME NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
-ORDER BY SCHEMA_NAME`
+// visible: hanya database tujuan koneksi yang bisa ditelusuri; database
+// tetangga di server yang sama tersembunyi (paritas dengan PostgreSQL).
+func (in *Inspector) visible(schemaName string) bool {
+	return schemaName == in.database && !excludedSchema(schemaName)
+}
+
+const listSchemasSQL = `SELECT DATABASE()`
 
 func (in *Inspector) ListSchemas(ctx context.Context) ([]string, error) {
-	rows, err := in.db.QueryContext(ctx, listSchemasSQL)
-	if err != nil {
-		return nil, fmt.Errorf("daftar schema: %w", err)
+	if in.database == "" || excludedSchema(in.database) {
+		return nil, nil
 	}
-	defer rows.Close()
-
-	var out []string
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return nil, fmt.Errorf("baca schema: %w", err)
-		}
-		out = append(out, name)
+	// DATABASE() dipastikan non-kosong oleh Open (ping); tetap dicek agar
+	// koneksi tanpa database default tidak mengeluarkan nama kosong.
+	var name string
+	if err := in.db.QueryRowContext(ctx, listSchemasSQL).Scan(&name); err != nil || name == "" {
+		return nil, nil
 	}
-	return out, rows.Err()
+	return []string{name}, nil
 }
 
 // TABLE_ROWS adalah estimasi InnoDB (bisa 0 bila belum pernah di-analyze);
@@ -63,7 +64,7 @@ WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'
 ORDER BY TABLE_NAME`
 
 func (in *Inspector) ListTables(ctx context.Context, schemaName string) ([]schema.TableSummary, error) {
-	if excludedSchema(schemaName) {
+	if !in.visible(schemaName) {
 		return nil, nil
 	}
 	rows, err := in.db.QueryContext(ctx, listTablesSQL, schemaName)
@@ -94,7 +95,7 @@ FROM information_schema.TABLES
 WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`
 
 func (in *Inspector) DescribeTable(ctx context.Context, schemaName, table string) (*schema.Table, error) {
-	if excludedSchema(schemaName) {
+	if !in.visible(schemaName) {
 		return nil, fmt.Errorf("tabel %s.%s: %w", schemaName, table, dbms.ErrNotFound)
 	}
 
@@ -302,7 +303,9 @@ WHERE tc.TABLE_SCHEMA = ? AND tc.TABLE_NAME = ? AND tc.CONSTRAINT_TYPE = 'CHECK'
 			return nil, fmt.Errorf("baca constraint check: %w", err)
 		}
 		if p, ok := byName[name]; ok {
-			p.Definition = clause
+			// Sama seperti pg_get_constraintdef: simpan_clause utuh
+			// ("CHECK (...)") supaya generator tinggal menempel.
+			p.Definition = "CHECK " + clause
 		}
 	}
 	if err := crows.Err(); err != nil {
