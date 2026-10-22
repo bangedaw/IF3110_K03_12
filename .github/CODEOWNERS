@@ -1,6 +1,6 @@
-/api/openapi.yaml                         @miguelsinaga @EDO_GITHUB @RHINO_GITHUB
-/backend/internal/platformdb/migrations/  @miguelsinaga @EDO_GITHUB @RHINO_GITHUB
-/backend/internal/dbms/*.go               @EDO_GITHUB @RHINO_GITHUB
+/api/openapi.yaml                         @miguelsinaga @bangedaw @SpicyCoinCracker
+/backend/internal/platformdb/migrations/  @miguelsinaga @bangedaw @SpicyCoinCracker
+/backend/internal/dbms/*.go               @bangedaw @SpicyCoinCracker
 
 /backend/cmd/                             @miguelsinaga
 /backend/internal/config/                 @miguelsinaga
@@ -16,16 +16,16 @@
 /frontend/src/features/admin/             @miguelsinaga
 /.github/                                 @miguelsinaga
 
-/backend/internal/secret/                 @EDO_GITHUB
-/backend/internal/dbconn/                 @EDO_GITHUB
-/backend/internal/schema/                 @EDO_GITHUB
-/backend/internal/explorer/               @EDO_GITHUB
-/backend/internal/schemadiff/             @EDO_GITHUB
-/backend/internal/testutil/               @EDO_GITHUB
-/frontend/src/features/connections/       @EDO_GITHUB
-/frontend/src/features/explorer/          @EDO_GITHUB
-/frontend/src/features/schema-diff/       @EDO_GITHUB
-/deploy/                                  @EDO_GITHUB
+/backend/internal/secret/                 @bangedaw
+/backend/internal/dbconn/                 @bangedaw
+/backend/internal/schema/                 @bangedaw
+/backend/internal/explorer/               @bangedaw
+/backend/internal/schemadiff/             @bangedaw
+/backend/internal/testutil/               @bangedaw
+/frontend/src/features/connections/       @bangedaw
+/frontend/src/features/explorer/          @bangedaw
+/frontend/src/features/schema-diff/       @bangedaw
+/deploy/                                  @bangedaw
 
-/backend/internal/migration/              @RHINO_GITHUB
-/frontend/src/features/migrations/        @RHINO_GITHUB
+/backend/internal/migration/              @SpicyCoinCracker
+/frontend/src/features/migrations/        @SpicyCoinCracker
