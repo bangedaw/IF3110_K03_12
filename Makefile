@@ -4,7 +4,34 @@ SQLC_VERSION         := v1.29.0
 OAPI_CODEGEN_VERSION := v2.4.1
 GOLANGCI_VERSION     := v2.5.0
 
-.PHONY: gen lint run
+COMPOSE := docker compose -f deploy/docker-compose.yml
+
+.PHONY: gen lint run dev down seed reseed check test test-race
+
+dev:
+	$(COMPOSE) up -d --wait
+
+down:
+	$(COMPOSE) down
+
+# Seed dimuat otomatis saat container pertama dibuat (mount ke
+# /docker-entrypoint-initdb.d); target ini memastikan container sehat dan seed ada.
+seed: dev
+	bash deploy/check.sh
+
+reseed:
+	$(COMPOSE) down -v
+	$(COMPOSE) up -d --wait
+	bash deploy/check.sh
+
+check:
+	bash deploy/check.sh
+
+test:
+	cd backend && go test ./...
+
+test-race:
+	cd backend && go test -race ./...
 
 gen:
 	cd backend && go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
