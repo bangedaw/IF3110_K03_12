@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -17,6 +18,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/schemadiff"
 )
 
 // listLimit: explorer memuat seluruh koneksi dalam satu halaman.
@@ -248,6 +250,106 @@ func (s *Service) Snapshot(ctx context.Context, p authz.Principal, databaseID, s
 		return nil, err
 	}
 	return toSnapshot(row)
+}
+
+// SchemaDiffRequest adalah body POST .../schema-diff:
+// against = pembanding (koneksi hidup lain atau snapshot tersimpan),
+// direction = arah SQL yang dihasilkan (hanya "toTarget": buat {databaseId}
+// menyamai against).
+type SchemaDiffRequest struct {
+	Against struct {
+		Type string `json:"type"` // "database" | "snapshot"
+		ID   int64  `json:"id"`
+	} `json:"against"`
+	Direction string `json:"direction"`
+}
+
+// SchemaDiffResult: perubahan skema, SQL gabungan, dan peringatan generator.
+type SchemaDiffResult struct {
+	Changes  []schemadiff.Change `json:"changes"`
+	SQL      string              `json:"sql"`
+	Warnings []string            `json:"warnings"`
+}
+
+// SchemaDiff membandingkan skema hidup {databaseId} dengan against lalu
+// menghasilkan SQL pengubah (arah toTarget). Butuh view di kedua sisi;
+// snapshot terkunci pada databaseId (cross-database -> 404).
+func (s *Service) SchemaDiff(ctx context.Context, p authz.Principal, databaseID int64, req SchemaDiffRequest) (*SchemaDiffResult, error) {
+	if fields := validateDiffRequest(req); len(fields) > 0 {
+		return nil, apperr.Validation(fields)
+	}
+	if err := s.az.Authorize(ctx, p, authz.ActionSchemaDiff, authz.Resource{DatabaseID: databaseID}); err != nil {
+		return nil, err
+	}
+
+	current, err := s.liveModel(ctx, p, databaseID)
+	if err != nil {
+		return nil, err
+	}
+
+	var target *schema.Model
+	switch req.Against.Type {
+	case "database":
+		target, err = s.liveModel(ctx, p, req.Against.ID)
+	case "snapshot":
+		var snap *Snapshot
+		snap, err = s.Snapshot(ctx, p, databaseID, req.Against.ID)
+		if err == nil {
+			target = snap.Model
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	changes := schemadiff.Diff(current, target)
+	if changes == nil {
+		changes = []schemadiff.Change{}
+	}
+
+	row, err := s.store.GetConnectionByID(ctx, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	res, err := schemadiff.Generate(string(row.Kind), changes)
+	if err != nil {
+		if errors.Is(err, schemadiff.ErrUnsupportedDialect) {
+			return nil, apperr.Validation(map[string]string{"against": err.Error()})
+		}
+		return nil, err
+	}
+	return &SchemaDiffResult{
+		Changes:  changes,
+		SQL:      strings.Join(res.Statements, ";\n"),
+		Warnings: res.Warnings,
+	}, nil
+}
+
+func validateDiffRequest(req SchemaDiffRequest) map[string]string {
+	fields := map[string]string{}
+	if req.Direction != "toTarget" {
+		fields["direction"] = `hanya "toTarget" yang didukung`
+	}
+	if req.Against.Type != "database" && req.Against.Type != "snapshot" {
+		fields["against.type"] = `harus "database" atau "snapshot"`
+	}
+	if req.Against.ID <= 0 {
+		fields["against.id"] = "harus positif"
+	}
+	return fields
+}
+
+// liveModel: authorize view lalu ambil snapshot skema dari koneksi hidup.
+func (s *Service) liveModel(ctx context.Context, p authz.Principal, id int64) (*schema.Model, error) {
+	conn, err := s.target(ctx, p, id)
+	if err != nil {
+		return nil, err
+	}
+	model, err := conn.Inspector().Snapshot(ctx)
+	if err != nil {
+		return nil, mapTargetErr(err)
+	}
+	return model, nil
 }
 
 func toSnapshot(row gen.SchemaSnapshot) (*Snapshot, error) {

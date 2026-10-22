@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/auth"
@@ -30,9 +31,11 @@ const cipherKey = "REVWLU9OTFktREVWLU9OTFktREVWLU9OTFktREVWLU8="
 
 type fixture struct {
 	srv        *httptest.Server
+	target     *pgxpool.Pool
 	liveID     int64
 	inactiveID int64
 	deadID     int64
+	nograntID  int64
 }
 
 // setup menyiapkan platform DB dengan 3 koneksi:
@@ -71,10 +74,13 @@ func setup(t *testing.T) fixture {
 	}
 	f := fixture{
 		srv:        nil,
+		target:     target,
 		liveID:     insert("live", cc.Host, int(cc.Port), true, cc.Password),
 		inactiveID: insert("inactive", cc.Host, int(cc.Port), false, cc.Password),
 		// Port 1 tidak menerima koneksi apa pun (koneksi ditolak segera).
 		deadID: insert("dead", "127.0.0.1", 1, true, "apa-saja"),
+		// Aktif tapi tidak digrant ke siapa pun (uji sisi target diff).
+		nograntID: insert("nogrant", cc.Host, int(cc.Port), true, cc.Password),
 	}
 
 	q := gen.New(platform)

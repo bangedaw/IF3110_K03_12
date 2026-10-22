@@ -81,6 +81,30 @@ const (
 	VerifyFull SSLMode = "verify-full"
 )
 
+// Defines values for SchemaDiffChangeKind.
+const (
+	AddColumn      SchemaDiffChangeKind = "add_column"
+	AddConstraint  SchemaDiffChangeKind = "add_constraint"
+	AddIndex       SchemaDiffChangeKind = "add_index"
+	AddTable       SchemaDiffChangeKind = "add_table"
+	AlterColumn    SchemaDiffChangeKind = "alter_column"
+	DropColumn     SchemaDiffChangeKind = "drop_column"
+	DropConstraint SchemaDiffChangeKind = "drop_constraint"
+	DropIndex      SchemaDiffChangeKind = "drop_index"
+	DropTable      SchemaDiffChangeKind = "drop_table"
+)
+
+// Defines values for SchemaDiffRequestAgainstType.
+const (
+	Database SchemaDiffRequestAgainstType = "database"
+	Snapshot SchemaDiffRequestAgainstType = "snapshot"
+)
+
+// Defines values for SchemaDiffRequestDirection.
+const (
+	ToTarget SchemaDiffRequestDirection = "toTarget"
+)
+
 // Defines values for OrderDir.
 const (
 	Asc  OrderDir = "asc"
@@ -377,6 +401,51 @@ type ProblemCode string
 // SSLMode defines model for SSLMode.
 type SSLMode string
 
+// SchemaDiffChange defines model for SchemaDiffChange.
+type SchemaDiffChange struct {
+	Column     *ExplorerColumn     `json:"column,omitempty"`
+	Constraint *ExplorerConstraint `json:"constraint,omitempty"`
+
+	// Destructive true untuk drop table/kolumn, pengetatan nullable, atau alter kolumn identitas
+	Destructive bool                 `json:"destructive"`
+	Index       *ExplorerIndex       `json:"index,omitempty"`
+	Kind        SchemaDiffChangeKind `json:"kind"`
+	Name        string               `json:"name"`
+	Previous    *ExplorerColumn      `json:"previous,omitempty"`
+	Schema      string               `json:"schema"`
+	Table       string               `json:"table"`
+	TableDef    *ExplorerTable       `json:"tableDef,omitempty"`
+}
+
+// SchemaDiffChangeKind defines model for SchemaDiffChange.Kind.
+type SchemaDiffChangeKind string
+
+// SchemaDiffRequest defines model for SchemaDiffRequest.
+type SchemaDiffRequest struct {
+	Against struct {
+		Id   int64                        `json:"id"`
+		Type SchemaDiffRequestAgainstType `json:"type"`
+	} `json:"against"`
+
+	// Direction Arah SQL yang dihasilkan; "toTarget" membuat databaseId menyamai against
+	Direction SchemaDiffRequestDirection `json:"direction"`
+}
+
+// SchemaDiffRequestAgainstType defines model for SchemaDiffRequest.Against.Type.
+type SchemaDiffRequestAgainstType string
+
+// SchemaDiffRequestDirection Arah SQL yang dihasilkan; "toTarget" membuat databaseId menyamai against
+type SchemaDiffRequestDirection string
+
+// SchemaDiffResult defines model for SchemaDiffResult.
+type SchemaDiffResult struct {
+	Changes []SchemaDiffChange `json:"changes"`
+
+	// Sql Statement urut aman dipisah ";\n"; kosong bila tanpa perubahan
+	Sql      string   `json:"sql"`
+	Warnings []string `json:"warnings"`
+}
+
 // SchemaNameList defines model for SchemaNameList.
 type SchemaNameList = []string
 
@@ -531,6 +600,9 @@ type PostApiAdminUsersUserIdPasswordJSONRequestBody = PasswordReset
 
 // PostApiAuthLoginJSONRequestBody defines body for PostApiAuthLogin for application/json ContentType.
 type PostApiAuthLoginJSONRequestBody = LoginRequest
+
+// PostApiDatabasesDatabaseIdSchemaDiffJSONRequestBody defines body for PostApiDatabasesDatabaseIdSchemaDiff for application/json ContentType.
+type PostApiDatabasesDatabaseIdSchemaDiffJSONRequestBody = SchemaDiffRequest
 
 // AsDatabaseConnectionCreate returns the union data inside the DatabaseConnectionTestRequest as a DatabaseConnectionCreate
 func (t DatabaseConnectionTestRequest) AsDatabaseConnectionCreate() (DatabaseConnectionCreate, error) {

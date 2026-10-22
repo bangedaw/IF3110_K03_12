@@ -26,6 +26,7 @@ func Routes(r chi.Router, s *Service) {
 		r.Post("/{databaseId}/snapshots", s.handleCreateSnapshot)
 		r.Get("/{databaseId}/snapshots", s.handleListSnapshots)
 		r.Get("/{databaseId}/snapshots/{snapshotId}", s.handleGetSnapshot)
+		r.Post("/{databaseId}/schema-diff", s.handleSchemaDiff)
 	})
 }
 
@@ -211,6 +212,28 @@ func (s *Service) handleGetSnapshot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, err := s.Snapshot(r.Context(), p, id, snapshotID)
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+func (s *Service) handleSchemaDiff(w http.ResponseWriter, r *http.Request) {
+	p, ok := s.principal(w, r)
+	if !ok {
+		return
+	}
+	id, ok := idFromPath(w, r)
+	if !ok {
+		return
+	}
+	var req SchemaDiffRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	out, err := s.SchemaDiff(r.Context(), p, id, req)
 	if err != nil {
 		httpx.Error(w, r, err)
 		return

@@ -544,6 +544,36 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/databases/{databaseId}/schema-diff:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    post:
+      tags: [explorer]
+      summary: Bandingkan skema hidup database ini dengan pembanding; hasilkan SQL toTarget
+      description: |
+        Butuh view di kedua sisi (databaseId dan against); snapshot terkunci pada
+        databaseId (lintas database -> 404). Menyimpan hasil sebagai draft
+        migration dilakukan lewat endpoint migrations (Rhino).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SchemaDiffRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchemaDiffResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: VALIDATION_FAILED (direction/against tidak valid)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
 
 components:
   securitySchemes:
@@ -968,4 +998,55 @@ components:
         takenBy: { type: integer, format: int64 }
         takenAt: { type: string, format: date-time }
         model: { $ref: '#/components/schemas/ExplorerSchemaModel' }
+
+    SchemaDiffRequest:
+      type: object
+      required: [against, direction]
+      additionalProperties: false
+      properties:
+        against:
+          type: object
+          required: [type, id]
+          additionalProperties: false
+          properties:
+            type: { type: string, enum: [database, snapshot] }
+            id: { type: integer, format: int64, minimum: 1 }
+        direction:
+          type: string
+          enum: [toTarget]
+          description: Arah SQL yang dihasilkan; "toTarget" membuat databaseId menyamai against
+
+    SchemaDiffChange:
+      type: object
+      required: [kind, schema, table, name, destructive]
+      properties:
+        kind:
+          type: string
+          enum: [add_table, drop_table, add_column, drop_column, alter_column,
+                 add_constraint, drop_constraint, add_index, drop_index]
+        schema: { type: string }
+        table: { type: string }
+        name: { type: string }
+        destructive:
+          type: boolean
+          description: true untuk drop table/kolumn, pengetatan nullable, atau alter kolumn identitas
+        tableDef: { $ref: '#/components/schemas/ExplorerTable' }
+        column: { $ref: '#/components/schemas/ExplorerColumn' }
+        previous: { $ref: '#/components/schemas/ExplorerColumn' }
+        constraint: { $ref: '#/components/schemas/ExplorerConstraint' }
+        index: { $ref: '#/components/schemas/ExplorerIndex' }
+
+    SchemaDiffResult:
+      type: object
+      required: [changes, sql, warnings]
+      properties:
+        changes:
+          type: array
+          items: { $ref: '#/components/schemas/SchemaDiffChange' }
+        sql:
+          type: string
+          description: Statement urut aman dipisah ";\n"; kosong bila tanpa perubahan
+        warnings:
+          type: array
+          items: { type: string }
 
