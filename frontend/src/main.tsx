@@ -5,7 +5,7 @@ import "./index.css";
 
 async function enableMocking() {
   if (import.meta.env.DEV) {
-    const { worker } = await import("../mocks/browser.ts");
+    const { worker } = await import("./mocks/browser.ts");
     return worker.start({ onUnhandledFrame: "bypass" });
   }
 }
