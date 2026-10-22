@@ -6,6 +6,7 @@ package dbms
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
@@ -155,4 +156,24 @@ type unimplementedExplainer struct{}
 
 func (unimplementedExplainer) Explain(context.Context, ExplainInput) (*ExplainResult, error) {
 	return nil, ErrNotImplemented
+}
+
+// Driver didaftarkan oleh package driver masing-masing (init), sehingga
+// menambah DBMS baru cukup menambah satu package dan mengimpornya di wiring.
+var (
+	driverMu     sync.RWMutex
+	driverByKind = map[string]Driver{}
+)
+
+func Register(d Driver) {
+	driverMu.Lock()
+	defer driverMu.Unlock()
+	driverByKind[d.Kind()] = d
+}
+
+func DriverFor(kind string) (Driver, bool) {
+	driverMu.RLock()
+	defer driverMu.RUnlock()
+	d, ok := driverByKind[kind]
+	return d, ok
 }

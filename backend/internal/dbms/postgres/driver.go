@@ -100,3 +100,5 @@ func sanitize(cfg dbms.ConnConfig, err error) error {
 	}
 	return errors.New(msg)
 }
+
+func init() { dbms.Register(Driver{}) }
