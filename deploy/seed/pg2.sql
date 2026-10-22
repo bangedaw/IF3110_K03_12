@@ -73,3 +73,5 @@ SELECT 1 + (i % 500),
        (ARRAY ['in', 'out', 'adjust'])[1 + (i % 3)],
        now() - (i || ' minutes')::interval
 FROM generate_series(1, 3000) AS i;
+
+ANALYZE;

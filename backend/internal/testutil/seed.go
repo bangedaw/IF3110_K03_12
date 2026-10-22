@@ -66,6 +66,8 @@ INSERT INTO app.attachments (book_id, data, note)
 VALUES (1, '\xdeadbeef', 'cover kecil'),
        (2, NULL, 'tanpa gambar'),
        (3, '\x00ff10', repeat('catatan yang cukup panjang untuk memotong tampilan data viewer. ', 5));
+
+ANALYZE;
 `
 
 const mysqlTargetSchema = `

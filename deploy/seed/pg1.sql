@@ -93,3 +93,5 @@ INSERT INTO reporting.daily_sales_summary (day, warehouse_id, total_in, total_ou
 SELECT (now()::date - (d || ' days')::interval)::date, w, d * 3, d * 2
 FROM generate_series(1, 30) AS d,
      generate_series(1, 20) AS w;
+
+ANALYZE;
