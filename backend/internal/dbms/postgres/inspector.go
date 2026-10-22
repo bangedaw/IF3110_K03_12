@@ -69,7 +69,8 @@ func (in *Inspector) ListTables(ctx context.Context, schemaName string) ([]schem
 	}
 	defer rows.Close()
 
-	var out []schema.TableSummary
+	// Slice diinisialisasi agar JSON selalu array (bukan null).
+	out := []schema.TableSummary{}
 	for rows.Next() {
 		var ts schema.TableSummary
 		if err := rows.Scan(&ts.Name, &ts.RowEstimate); err != nil {
@@ -162,7 +163,8 @@ func (in *Inspector) columns(ctx context.Context, reg string) ([]schema.Column, 
 	}
 	defer rows.Close()
 
-	var cols []schema.Column
+	// Slice diinisialisasi agar JSON selalu berupa array, bukan null.
+	cols := []schema.Column{}
 	attrs := map[int16]string{}
 	for rows.Next() {
 		var (
@@ -215,7 +217,7 @@ func (in *Inspector) constraints(ctx context.Context, reg string, attrs map[int1
 	}
 	defer rows.Close()
 
-	var out []schema.Constraint
+	out := []schema.Constraint{}
 	for rows.Next() {
 		var (
 			name, contype         string
@@ -261,7 +263,7 @@ func (in *Inspector) indexes(ctx context.Context, reg string, attrs map[int16]st
 	}
 	defer rows.Close()
 
-	var out []schema.Index
+	out := []schema.Index{}
 	for rows.Next() {
 		var (
 			name, method, indkey, def string

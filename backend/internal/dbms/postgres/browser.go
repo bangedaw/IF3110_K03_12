@@ -80,6 +80,7 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 
 	page := &dbms.RowsPage{
 		Columns:       cols,
+		Rows:          [][]dbms.Cell{},
 		TotalEstimate: estimate,
 		Limit:         limit,
 		Offset:        offset,

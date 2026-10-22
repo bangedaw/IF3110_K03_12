@@ -16,14 +16,46 @@ const (
 
 // Defines values for AccessLevel.
 const (
-	Edit AccessLevel = "edit"
-	View AccessLevel = "view"
+	AccessLevelEdit AccessLevel = "edit"
+	AccessLevelView AccessLevel = "view"
 )
 
 // Defines values for DBMSKind.
 const (
-	Mysql    DBMSKind = "mysql"
-	Postgres DBMSKind = "postgres"
+	DBMSKindMysql    DBMSKind = "mysql"
+	DBMSKindPostgres DBMSKind = "postgres"
+)
+
+// Defines values for ExplorerConstraintType.
+const (
+	Check      ExplorerConstraintType = "check"
+	ForeignKey ExplorerConstraintType = "foreign_key"
+	PrimaryKey ExplorerConstraintType = "primary_key"
+	Unique     ExplorerConstraintType = "unique"
+)
+
+// Defines values for ExplorerDatabaseKind.
+const (
+	ExplorerDatabaseKindMysql    ExplorerDatabaseKind = "mysql"
+	ExplorerDatabaseKindPostgres ExplorerDatabaseKind = "postgres"
+)
+
+// Defines values for ExplorerDatabaseDetailKind.
+const (
+	Mysql    ExplorerDatabaseDetailKind = "mysql"
+	Postgres ExplorerDatabaseDetailKind = "postgres"
+)
+
+// Defines values for ExplorerTableKind.
+const (
+	ExplorerTableKindTable ExplorerTableKind = "table"
+	ExplorerTableKindView  ExplorerTableKind = "view"
+)
+
+// Defines values for ExplorerTableSummaryKind.
+const (
+	Table ExplorerTableSummaryKind = "table"
+	View  ExplorerTableSummaryKind = "view"
 )
 
 // Defines values for ProblemCode.
@@ -47,6 +79,12 @@ const (
 	Require    SSLMode = "require"
 	VerifyCa   SSLMode = "verify-ca"
 	VerifyFull SSLMode = "verify-full"
+)
+
+// Defines values for OrderDir.
+const (
+	Asc  OrderDir = "asc"
+	Desc OrderDir = "desc"
 )
 
 // AccessLevel defines model for AccessLevel.
@@ -129,6 +167,126 @@ type DatabaseConnectionUpdate struct {
 	Username     *string   `json:"username,omitempty"`
 }
 
+// ExplorerCell defines model for ExplorerCell.
+type ExplorerCell struct {
+	IsNull bool `json:"isNull"`
+
+	// Truncated true bila nilai dipotong pada batas tampilan
+	Truncated *bool `json:"truncated,omitempty"`
+
+	// Value Nilai sebagai teks (bytea hex, numeric string, dst); kosong bila isNull
+	Value string `json:"value"`
+}
+
+// ExplorerColumn defines model for ExplorerColumn.
+type ExplorerColumn struct {
+	// DataType Tipe kanonik ternormalisasi
+	DataType    string  `json:"dataType"`
+	Default     *string `json:"default,omitempty"`
+	IsGenerated *bool   `json:"isGenerated,omitempty"`
+	IsIdentity  *bool   `json:"isIdentity,omitempty"`
+	Name        string  `json:"name"`
+	Nullable    bool    `json:"nullable"`
+	Ordinal     int     `json:"ordinal"`
+
+	// RawType Tipe mentah dari DBMS
+	RawType *string `json:"rawType,omitempty"`
+}
+
+// ExplorerConstraint defines model for ExplorerConstraint.
+type ExplorerConstraint struct {
+	Columns *[]string `json:"columns,omitempty"`
+
+	// Definition Hasil pg_get_constraintdef apa adanya
+	Definition *string                `json:"definition,omitempty"`
+	Name       string                 `json:"name"`
+	OnDelete   *string                `json:"onDelete,omitempty"`
+	OnUpdate   *string                `json:"onUpdate,omitempty"`
+	RefColumns *[]string              `json:"refColumns,omitempty"`
+	RefSchema  *string                `json:"refSchema,omitempty"`
+	RefTable   *string                `json:"refTable,omitempty"`
+	Type       ExplorerConstraintType `json:"type"`
+}
+
+// ExplorerConstraintType defines model for ExplorerConstraint.Type.
+type ExplorerConstraintType string
+
+// ExplorerDatabase defines model for ExplorerDatabase.
+type ExplorerDatabase struct {
+	Id       int64                `json:"id"`
+	IsActive bool                 `json:"isActive"`
+	Kind     ExplorerDatabaseKind `json:"kind"`
+	Level    AccessLevel          `json:"level"`
+	Name     string               `json:"name"`
+}
+
+// ExplorerDatabaseKind defines model for ExplorerDatabase.Kind.
+type ExplorerDatabaseKind string
+
+// ExplorerDatabaseDetail defines model for ExplorerDatabaseDetail.
+type ExplorerDatabaseDetail struct {
+	DatabaseName string                     `json:"databaseName"`
+	Host         string                     `json:"host"`
+	Id           int64                      `json:"id"`
+	IsActive     bool                       `json:"isActive"`
+	Kind         ExplorerDatabaseDetailKind `json:"kind"`
+	Level        AccessLevel                `json:"level"`
+	Name         string                     `json:"name"`
+	Port         int                        `json:"port"`
+	SslMode      SSLMode                    `json:"sslMode"`
+}
+
+// ExplorerDatabaseDetailKind defines model for ExplorerDatabaseDetail.Kind.
+type ExplorerDatabaseDetailKind string
+
+// ExplorerIndex defines model for ExplorerIndex.
+type ExplorerIndex struct {
+	Columns *[]string `json:"columns,omitempty"`
+
+	// Definition Hasil pg_get_indexdef apa adanya
+	Definition *string `json:"definition,omitempty"`
+	Method     *string `json:"method,omitempty"`
+	Name       string  `json:"name"`
+	Primary    bool    `json:"primary"`
+	Unique     bool    `json:"unique"`
+}
+
+// ExplorerRowsPage defines model for ExplorerRowsPage.
+type ExplorerRowsPage struct {
+	Columns       []string         `json:"columns"`
+	Limit         int              `json:"limit"`
+	Offset        int              `json:"offset"`
+	Rows          [][]ExplorerCell `json:"rows"`
+	TotalEstimate int64            `json:"totalEstimate"`
+}
+
+// ExplorerTable defines model for ExplorerTable.
+type ExplorerTable struct {
+	Columns     *[]ExplorerColumn     `json:"columns,omitempty"`
+	Constraints *[]ExplorerConstraint `json:"constraints,omitempty"`
+	Indexes     *[]ExplorerIndex      `json:"indexes,omitempty"`
+	Kind        ExplorerTableKind     `json:"kind"`
+	Name        string                `json:"name"`
+	RowEstimate int64                 `json:"rowEstimate"`
+	Schema      string                `json:"schema"`
+}
+
+// ExplorerTableKind defines model for ExplorerTable.Kind.
+type ExplorerTableKind string
+
+// ExplorerTableSummary defines model for ExplorerTableSummary.
+type ExplorerTableSummary struct {
+	Kind ExplorerTableSummaryKind `json:"kind"`
+	Name string                   `json:"name"`
+
+	// RowEstimate Perkiraan jumlah baris (reltuples; 0 bila belum pernah ANALYZE)
+	RowEstimate int64  `json:"rowEstimate"`
+	Schema      string `json:"schema"`
+}
+
+// ExplorerTableSummaryKind defines model for ExplorerTableSummary.Kind.
+type ExplorerTableSummaryKind string
+
 // Grant defines model for Grant.
 type Grant struct {
 	DatabaseId   int64       `json:"databaseId"`
@@ -208,6 +366,9 @@ type ProblemCode string
 // SSLMode defines model for SSLMode.
 type SSLMode string
 
+// SchemaNameList defines model for SchemaNameList.
+type SchemaNameList = []string
+
 // User defines model for User.
 type User struct {
 	CreatedAt       time.Time `json:"createdAt"`
@@ -254,6 +415,18 @@ type Limit = int
 // Offset defines model for Offset.
 type Offset = int
 
+// OrderBy defines model for OrderBy.
+type OrderBy = string
+
+// OrderDir defines model for OrderDir.
+type OrderDir string
+
+// SchemaName defines model for SchemaName.
+type SchemaName = string
+
+// TableName defines model for TableName.
+type TableName = string
+
 // UserId defines model for UserId.
 type UserId = int64
 
@@ -291,6 +464,16 @@ type GetApiAdminGroupsParams struct {
 type GetApiAdminUsersParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// GetApiDatabasesDatabaseIdSchemasSchemaNameTablesTableNameRowsParams defines parameters for GetApiDatabasesDatabaseIdSchemasSchemaNameTablesTableNameRows.
+type GetApiDatabasesDatabaseIdSchemasSchemaNameTablesTableNameRowsParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// OrderBy Harus salah satu nama kolom tabel (ditolak driver bila bukan)
+	OrderBy  *OrderBy  `form:"orderBy,omitempty" json:"orderBy,omitempty"`
+	OrderDir *OrderDir `form:"orderDir,omitempty" json:"orderDir,omitempty"`
 }
 
 // PostApiAdminDatabasesJSONRequestBody defines body for PostApiAdminDatabases for application/json ContentType.
