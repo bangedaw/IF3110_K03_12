@@ -82,23 +82,55 @@ func NormalizeDefault(kind, raw string) string {
 }
 
 func stripPGCast(s string) string {
+	var b strings.Builder
 	inQuote := false
-	for i := 0; i+1 < len(s); i++ {
-		switch s[i] {
-		case '\'':
-
-			if inQuote && s[i+1] == '\'' {
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '\'':
+			if inQuote && i+1 < len(s) && s[i+1] == '\'' {
+				b.WriteString("''")
 				i++
 				continue
 			}
 			inQuote = !inQuote
-		case ':':
-			if !inQuote && s[i+1] == ':' {
-				return strings.TrimSpace(s[:i])
+		case inQuote:
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+		case c == ':' && i+1 < len(s) && s[i+1] == ':':
+			if depth == 0 {
+				return strings.TrimSpace(b.String())
+			}
+			i = skipCastType(s, i+2) - 1
+			continue
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
+}
+
+func skipCastType(s string, i int) int {
+	nested := 0
+	for i < len(s) {
+		switch s[i] {
+		case '(':
+			nested++
+		case ')':
+			if nested == 0 {
+				return i
+			}
+			nested--
+		case ',':
+			if nested == 0 {
+				return i
 			}
 		}
+		i++
 	}
-	return s
+	return i
 }
 
 func splitType(s string) (name, args string) {

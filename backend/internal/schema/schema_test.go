@@ -14,7 +14,6 @@ func TestNormalizeType(t *testing.T) {
 		raw  string
 		want string
 	}{
-
 		{schema.KindPostgres, "int4", "integer"},
 		{schema.KindPostgres, "int2", "smallint"},
 		{schema.KindPostgres, "int8", "bigint"},
@@ -68,6 +67,10 @@ func TestNormalizeDefault(t *testing.T) {
 		{schema.KindPostgres, "NULL", "NULL"},
 		{schema.KindPostgres, "true", "TRUE"},
 		{schema.KindPostgres, "'a'::inventory.kind_enum", "'a'"},
+		{schema.KindPostgres, "nextval('inventory.warehouses_id_seq'::regclass)", "nextval('inventory.warehouses_id_seq')"},
+		{schema.KindPostgres, "COALESCE(price::numeric(10,2), 0)", "COALESCE(price, 0)"},
+		{schema.KindPostgres, "(now() + '1 day'::interval)", "(now() + '1 day')"},
+		{schema.KindPostgres, "'it''s::ok'::text", "'it''s::ok'"},
 		{schema.KindMySQL, "current_timestamp()", "CURRENT_TIMESTAMP"},
 		{schema.KindMySQL, "NULL", "NULL"},
 		{schema.KindMySQL, "0", "0"},
