@@ -292,6 +292,290 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
 
+  # ===== [Edo] Koneksi database target =====
+  /api/admin/databases:
+    get:
+      tags: [connections]
+      summary: Daftar koneksi (Platform Admin)
+      parameters:
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Offset'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatabaseConnectionPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [connections]
+      summary: Tambah koneksi; password disimpan terenkripsi dan tidak pernah dikembalikan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DatabaseConnectionCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatabaseConnection' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/admin/databases/test:
+    post:
+      tags: [connections]
+      summary: Uji koneksi sebelum disimpan (tidak menyimpan apa pun)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DatabaseConnectionTestRequest' }
+      responses:
+        '200':
+          description: Koneksi berhasil
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectionTestResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+  /api/admin/databases/{databaseId}:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    get:
+      tags: [connections]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatabaseConnection' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [connections]
+      description: Password kosong berarti tidak diubah.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DatabaseConnectionUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatabaseConnection' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [connections]
+      responses:
+        '204': { description: Koneksi dihapus }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/admin/databases/{databaseId}/test:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    post:
+      tags: [connections]
+      summary: Uji koneksi tersimpan
+      responses:
+        '200':
+          description: Koneksi berhasil
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConnectionTestResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+
+  /api/databases:
+    get:
+      tags: [explorer]
+      summary: Daftar database target yang boleh dilihat user (EffectiveLevel bukan none dan koneksi aktif)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ExplorerDatabase' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+  /api/databases/{databaseId}:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    get:
+      tags: [explorer]
+      summary: Detail satu database target
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExplorerDatabaseDetail' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/databases/{databaseId}/schemas:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    get:
+      tags: [explorer]
+      summary: Daftar schema (non-sistem) pada database target
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchemaNameList' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+  /api/databases/{databaseId}/schemas/{schemaName}/tables:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+      - $ref: '#/components/parameters/SchemaName'
+    get:
+      tags: [explorer]
+      summary: Daftar tabel pada schema
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ExplorerTableSummary' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+  /api/databases/{databaseId}/schemas/{schemaName}/tables/{tableName}:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+      - $ref: '#/components/parameters/SchemaName'
+      - $ref: '#/components/parameters/TableName'
+    get:
+      tags: [explorer]
+      summary: Deskripsi tabel (kolom, constraint, index)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExplorerTable' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+  /api/databases/{databaseId}/schemas/{schemaName}/tables/{tableName}/rows:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+      - $ref: '#/components/parameters/SchemaName'
+      - $ref: '#/components/parameters/TableName'
+      - $ref: '#/components/parameters/Limit'
+      - $ref: '#/components/parameters/Offset'
+      - $ref: '#/components/parameters/OrderBy'
+      - $ref: '#/components/parameters/OrderDir'
+    get:
+      tags: [explorer]
+      summary: Halaman baris data (read-only); nilai sel sudah diserialisasi aman
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExplorerRowsPage' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+
+  /api/databases/{databaseId}/snapshots:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    get:
+      tags: [explorer]
+      summary: Daftar snapshot schema tersimpan untuk database ini
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SchemaSnapshot' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [explorer]
+      summary: Ambil snapshot schema terkini dari target hidup lalu simpan
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchemaSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+  /api/databases/{databaseId}/snapshots/{snapshotId}:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+      - $ref: '#/components/parameters/SnapshotId'
+    get:
+      tags: [explorer]
+      summary: Ambil satu snapshot (terkunci pada database; lintas database -> 404)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchemaSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/databases/{databaseId}/schema-diff:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    post:
+      tags: [explorer]
+      summary: Bandingkan skema hidup database ini dengan pembanding; hasilkan SQL toTarget
+      description: |
+        Butuh view di kedua sisi (databaseId dan against); snapshot terkunci pada
+        databaseId (lintas database -> 404). Menyimpan hasil sebagai draft
+        migration dilakukan lewat endpoint migrations (Rhino).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SchemaDiffRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SchemaDiffResult' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422':
+          description: VALIDATION_FAILED (direction/against tidak valid)
+          content:
+            application/problem+json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -324,6 +608,30 @@ components:
       schema: { type: integer, format: int64 }
     DatabaseId:
       name: databaseId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    SchemaName:
+      name: schemaName
+      in: path
+      required: true
+      schema: { type: string, maxLength: 128 }
+    TableName:
+      name: tableName
+      in: path
+      required: true
+      schema: { type: string, maxLength: 128 }
+    OrderBy:
+      name: orderBy
+      in: query
+      description: Harus salah satu nama kolom tabel (ditolak driver bila bukan)
+      schema: { type: string, maxLength: 128 }
+    OrderDir:
+      name: orderDir
+      in: query
+      schema: { type: string, enum: [asc, desc], default: asc }
+    SnapshotId:
+      name: snapshotId
       in: path
       required: true
       schema: { type: integer, format: int64 }
@@ -486,4 +794,260 @@ components:
       required: [level]
       properties:
         level: { $ref: '#/components/schemas/AccessLevel' }
+
+    # ===== [Edo] Koneksi database target =====
+    DBMSKind:
+      type: string
+      enum: [postgres, mysql]
+    SSLMode:
+      type: string
+      enum: [disable, require, verify-ca, verify-full]
+    DatabaseConnection:
+      type: object
+      description: Password tidak pernah dikembalikan; `hasPassword` hanya menandai ada/tidak.
+      required: [id, name, kind, host, port, databaseName, username, sslMode, isActive, hasPassword, createdAt, updatedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        kind: { $ref: '#/components/schemas/DBMSKind' }
+        host: { type: string }
+        port: { type: integer }
+        databaseName: { type: string }
+        username: { type: string }
+        sslMode: { $ref: '#/components/schemas/SSLMode' }
+        isActive: { type: boolean }
+        hasPassword: { type: boolean }
+        createdById: { type: integer, format: int64, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    DatabaseConnectionCreate:
+      type: object
+      required: [name, kind, host, port, databaseName, username, password]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        kind: { $ref: '#/components/schemas/DBMSKind' }
+        host: { type: string, minLength: 1, maxLength: 255 }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        databaseName: { type: string, minLength: 1, maxLength: 128 }
+        username: { type: string, minLength: 1, maxLength: 128 }
+        password: { type: string, format: password, minLength: 1, maxLength: 512 }
+        sslMode: { $ref: '#/components/schemas/SSLMode' }
+        isActive: { type: boolean, default: true }
+    DatabaseConnectionUpdate:
+      type: object
+      description: Field yang tidak dikirim tidak diubah. Password kosong berarti tidak diubah.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 64 }
+        kind: { $ref: '#/components/schemas/DBMSKind' }
+        host: { type: string, minLength: 1, maxLength: 255 }
+        port: { type: integer, minimum: 1, maximum: 65535 }
+        databaseName: { type: string, minLength: 1, maxLength: 128 }
+        username: { type: string, minLength: 1, maxLength: 128 }
+        password: { type: string, format: password, maxLength: 512 }
+        sslMode: { $ref: '#/components/schemas/SSLMode' }
+        isActive: { type: boolean }
+    DatabaseConnectionTestRequest:
+      description: Kredensial untuk diuji; bisa dari form tambah atau koneksi tersimpan.
+      oneOf:
+        - $ref: '#/components/schemas/DatabaseConnectionCreate'
+        - type: object
+          required: [databaseId]
+          properties:
+            databaseId: { type: integer, format: int64 }
+    ConnectionTestResult:
+      type: object
+      required: [ok, latencyMs]
+      properties:
+        ok: { type: boolean }
+        latencyMs: { type: integer, format: int64 }
+        detail: { type: string }
+    DatabaseConnectionPage:
+      type: object
+      required: [items, limit, offset, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/DatabaseConnection' }
+        limit: { type: integer }
+        offset: { type: integer }
+        total: { type: integer, format: int64 }
+
+    ExplorerDatabase:
+      type: object
+      required: [id, name, kind, isActive, level]
+      properties:
+        id: { type: integer, format: int64 }
+        name: { type: string }
+        kind:
+          type: string
+          enum: [postgres, mysql]
+        isActive: { type: boolean }
+        level: { $ref: '#/components/schemas/AccessLevel' }
+    ExplorerDatabaseDetail:
+      allOf:
+        - $ref: '#/components/schemas/ExplorerDatabase'
+        - type: object
+          required: [host, port, databaseName, sslMode]
+          properties:
+            host: { type: string }
+            port: { type: integer }
+            databaseName: { type: string }
+            sslMode: { $ref: '#/components/schemas/SSLMode' }
+    SchemaNameList:
+      type: array
+      items: { type: string }
+    ExplorerTableSummary:
+      type: object
+      required: [schema, name, kind, rowEstimate]
+      properties:
+        schema: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [table, view] }
+        rowEstimate:
+          type: integer
+          format: int64
+          description: Perkiraan jumlah baris (reltuples; 0 bila belum pernah ANALYZE)
+    ExplorerColumn:
+      type: object
+      required: [name, dataType, nullable, ordinal]
+      properties:
+        name: { type: string }
+        dataType: { type: string, description: Tipe kanonik ternormalisasi }
+        rawType: { type: string, description: Tipe mentah dari DBMS }
+        nullable: { type: boolean }
+        default: { type: string }
+        isIdentity: { type: boolean }
+        isGenerated: { type: boolean }
+        ordinal: { type: integer }
+    ExplorerConstraint:
+      type: object
+      required: [name, type]
+      properties:
+        name: { type: string }
+        type:
+          type: string
+          enum: [primary_key, foreign_key, unique, check]
+        columns: { type: array, items: { type: string } }
+        definition: { type: string, description: Hasil pg_get_constraintdef apa adanya }
+        refSchema: { type: string }
+        refTable: { type: string }
+        refColumns: { type: array, items: { type: string } }
+        onUpdate: { type: string }
+        onDelete: { type: string }
+    ExplorerIndex:
+      type: object
+      required: [name, unique, primary]
+      properties:
+        name: { type: string }
+        columns: { type: array, items: { type: string } }
+        unique: { type: boolean }
+        primary: { type: boolean }
+        method: { type: string }
+        definition: { type: string, description: Hasil pg_get_indexdef apa adanya }
+    ExplorerTable:
+      type: object
+      required: [schema, name, kind, rowEstimate]
+      properties:
+        schema: { type: string }
+        name: { type: string }
+        kind: { type: string, enum: [table, view] }
+        rowEstimate: { type: integer, format: int64 }
+        columns: { type: array, items: { $ref: '#/components/schemas/ExplorerColumn' } }
+        constraints: { type: array, items: { $ref: '#/components/schemas/ExplorerConstraint' } }
+        indexes: { type: array, items: { $ref: '#/components/schemas/ExplorerIndex' } }
+    ExplorerCell:
+      type: object
+      required: [value, isNull]
+      properties:
+        value:
+          type: string
+          description: Nilai sebagai teks (bytea hex, numeric string, dst); kosong bila isNull
+        isNull: { type: boolean }
+        truncated:
+          type: boolean
+          description: true bila nilai dipotong pada batas tampilan
+    ExplorerRowsPage:
+      type: object
+      required: [columns, rows, totalEstimate, limit, offset]
+      properties:
+        columns: { type: array, items: { type: string } }
+        rows:
+          type: array
+          items: { type: array, items: { $ref: '#/components/schemas/ExplorerCell' } }
+        totalEstimate: { type: integer, format: int64 }
+        limit: { type: integer, maximum: 200 }
+        offset: { type: integer }
+    ExplorerSchemaObject:
+      type: object
+      required: [name, tables]
+      properties:
+        name: { type: string }
+        tables: { type: array, items: { $ref: '#/components/schemas/ExplorerTable' } }
+    ExplorerSchemaModel:
+      description: Model kanonik seluruh schema sebuah database (hasil normalisasi)
+      type: object
+      required: [schemas]
+      properties:
+        schemas: { type: array, items: { $ref: '#/components/schemas/ExplorerSchemaObject' } }
+    SchemaSnapshot:
+      type: object
+      required: [id, databaseId, takenAt, model]
+      properties:
+        id: { type: integer, format: int64 }
+        databaseId: { type: integer, format: int64 }
+        migrationRunId: { type: integer, format: int64 }
+        takenBy: { type: integer, format: int64 }
+        takenAt: { type: string, format: date-time }
+        model: { $ref: '#/components/schemas/ExplorerSchemaModel' }
+
+    SchemaDiffRequest:
+      type: object
+      required: [against, direction]
+      additionalProperties: false
+      properties:
+        against:
+          type: object
+          required: [type, id]
+          additionalProperties: false
+          properties:
+            type: { type: string, enum: [database, snapshot] }
+            id: { type: integer, format: int64, minimum: 1 }
+        direction:
+          type: string
+          enum: [toTarget]
+          description: Arah SQL yang dihasilkan; "toTarget" membuat databaseId menyamai against
+
+    SchemaDiffChange:
+      type: object
+      required: [kind, schema, table, name, destructive]
+      properties:
+        kind:
+          type: string
+          enum: [add_table, drop_table, add_column, drop_column, alter_column,
+                 add_constraint, drop_constraint, add_index, drop_index]
+        schema: { type: string }
+        table: { type: string }
+        name: { type: string }
+        destructive:
+          type: boolean
+          description: true untuk drop table/kolumn, pengetatan nullable, atau alter kolumn identitas
+        tableDef: { $ref: '#/components/schemas/ExplorerTable' }
+        column: { $ref: '#/components/schemas/ExplorerColumn' }
+        previous: { $ref: '#/components/schemas/ExplorerColumn' }
+        constraint: { $ref: '#/components/schemas/ExplorerConstraint' }
+        index: { $ref: '#/components/schemas/ExplorerIndex' }
+
+    SchemaDiffResult:
+      type: object
+      required: [changes, sql, warnings]
+      properties:
+        changes:
+          type: array
+          items: { $ref: '#/components/schemas/SchemaDiffChange' }
+        sql:
+          type: string
+          description: Statement urut aman dipisah ";\n"; kosong bila tanpa perubahan
+        warnings:
+          type: array
+          items: { type: string }
 

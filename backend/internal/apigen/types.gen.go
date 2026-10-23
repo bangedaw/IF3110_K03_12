@@ -4,7 +4,10 @@
 package apigen
 
 import (
+	"encoding/json"
 	"time"
+
+	"github.com/oapi-codegen/runtime"
 )
 
 const (
@@ -13,8 +16,46 @@ const (
 
 // Defines values for AccessLevel.
 const (
-	Edit AccessLevel = "edit"
-	View AccessLevel = "view"
+	AccessLevelEdit AccessLevel = "edit"
+	AccessLevelView AccessLevel = "view"
+)
+
+// Defines values for DBMSKind.
+const (
+	DBMSKindMysql    DBMSKind = "mysql"
+	DBMSKindPostgres DBMSKind = "postgres"
+)
+
+// Defines values for ExplorerConstraintType.
+const (
+	Check      ExplorerConstraintType = "check"
+	ForeignKey ExplorerConstraintType = "foreign_key"
+	PrimaryKey ExplorerConstraintType = "primary_key"
+	Unique     ExplorerConstraintType = "unique"
+)
+
+// Defines values for ExplorerDatabaseKind.
+const (
+	ExplorerDatabaseKindMysql    ExplorerDatabaseKind = "mysql"
+	ExplorerDatabaseKindPostgres ExplorerDatabaseKind = "postgres"
+)
+
+// Defines values for ExplorerDatabaseDetailKind.
+const (
+	Mysql    ExplorerDatabaseDetailKind = "mysql"
+	Postgres ExplorerDatabaseDetailKind = "postgres"
+)
+
+// Defines values for ExplorerTableKind.
+const (
+	ExplorerTableKindTable ExplorerTableKind = "table"
+	ExplorerTableKindView  ExplorerTableKind = "view"
+)
+
+// Defines values for ExplorerTableSummaryKind.
+const (
+	Table ExplorerTableSummaryKind = "table"
+	View  ExplorerTableSummaryKind = "view"
 )
 
 // Defines values for ProblemCode.
@@ -32,6 +73,44 @@ const (
 	VALIDATIONFAILED ProblemCode = "VALIDATION_FAILED"
 )
 
+// Defines values for SSLMode.
+const (
+	Disable    SSLMode = "disable"
+	Require    SSLMode = "require"
+	VerifyCa   SSLMode = "verify-ca"
+	VerifyFull SSLMode = "verify-full"
+)
+
+// Defines values for SchemaDiffChangeKind.
+const (
+	AddColumn      SchemaDiffChangeKind = "add_column"
+	AddConstraint  SchemaDiffChangeKind = "add_constraint"
+	AddIndex       SchemaDiffChangeKind = "add_index"
+	AddTable       SchemaDiffChangeKind = "add_table"
+	AlterColumn    SchemaDiffChangeKind = "alter_column"
+	DropColumn     SchemaDiffChangeKind = "drop_column"
+	DropConstraint SchemaDiffChangeKind = "drop_constraint"
+	DropIndex      SchemaDiffChangeKind = "drop_index"
+	DropTable      SchemaDiffChangeKind = "drop_table"
+)
+
+// Defines values for SchemaDiffRequestAgainstType.
+const (
+	Database SchemaDiffRequestAgainstType = "database"
+	Snapshot SchemaDiffRequestAgainstType = "snapshot"
+)
+
+// Defines values for SchemaDiffRequestDirection.
+const (
+	ToTarget SchemaDiffRequestDirection = "toTarget"
+)
+
+// Defines values for OrderDir.
+const (
+	Asc  OrderDir = "asc"
+	Desc OrderDir = "desc"
+)
+
 // AccessLevel defines model for AccessLevel.
 type AccessLevel string
 
@@ -40,6 +119,208 @@ type AuthSession struct {
 	CsrfToken string `json:"csrfToken"`
 	User      User   `json:"user"`
 }
+
+// ConnectionTestResult defines model for ConnectionTestResult.
+type ConnectionTestResult struct {
+	Detail    *string `json:"detail,omitempty"`
+	LatencyMs int64   `json:"latencyMs"`
+	Ok        bool    `json:"ok"`
+}
+
+// DBMSKind defines model for DBMSKind.
+type DBMSKind string
+
+// DatabaseConnection Password tidak pernah dikembalikan; `hasPassword` hanya menandai ada/tidak.
+type DatabaseConnection struct {
+	CreatedAt    time.Time `json:"createdAt"`
+	CreatedById  *int64    `json:"createdById"`
+	DatabaseName string    `json:"databaseName"`
+	HasPassword  bool      `json:"hasPassword"`
+	Host         string    `json:"host"`
+	Id           int64     `json:"id"`
+	IsActive     bool      `json:"isActive"`
+	Kind         DBMSKind  `json:"kind"`
+	Name         string    `json:"name"`
+	Port         int       `json:"port"`
+	SslMode      SSLMode   `json:"sslMode"`
+	UpdatedAt    time.Time `json:"updatedAt"`
+	Username     string    `json:"username"`
+}
+
+// DatabaseConnectionCreate defines model for DatabaseConnectionCreate.
+type DatabaseConnectionCreate struct {
+	DatabaseName string   `json:"databaseName"`
+	Host         string   `json:"host"`
+	IsActive     *bool    `json:"isActive,omitempty"`
+	Kind         DBMSKind `json:"kind"`
+	Name         string   `json:"name"`
+	Password     string   `json:"password"`
+	Port         int      `json:"port"`
+	SslMode      *SSLMode `json:"sslMode,omitempty"`
+	Username     string   `json:"username"`
+}
+
+// DatabaseConnectionPage defines model for DatabaseConnectionPage.
+type DatabaseConnectionPage struct {
+	Items  []DatabaseConnection `json:"items"`
+	Limit  int                  `json:"limit"`
+	Offset int                  `json:"offset"`
+	Total  int64                `json:"total"`
+}
+
+// DatabaseConnectionTestRequest Kredensial untuk diuji; bisa dari form tambah atau koneksi tersimpan.
+type DatabaseConnectionTestRequest struct {
+	union json.RawMessage
+}
+
+// DatabaseConnectionTestRequest1 defines model for .
+type DatabaseConnectionTestRequest1 struct {
+	DatabaseId int64 `json:"databaseId"`
+}
+
+// DatabaseConnectionUpdate Field yang tidak dikirim tidak diubah. Password kosong berarti tidak diubah.
+type DatabaseConnectionUpdate struct {
+	DatabaseName *string   `json:"databaseName,omitempty"`
+	Host         *string   `json:"host,omitempty"`
+	IsActive     *bool     `json:"isActive,omitempty"`
+	Kind         *DBMSKind `json:"kind,omitempty"`
+	Name         *string   `json:"name,omitempty"`
+	Password     *string   `json:"password,omitempty"`
+	Port         *int      `json:"port,omitempty"`
+	SslMode      *SSLMode  `json:"sslMode,omitempty"`
+	Username     *string   `json:"username,omitempty"`
+}
+
+// ExplorerCell defines model for ExplorerCell.
+type ExplorerCell struct {
+	IsNull bool `json:"isNull"`
+
+	// Truncated true bila nilai dipotong pada batas tampilan
+	Truncated *bool `json:"truncated,omitempty"`
+
+	// Value Nilai sebagai teks (bytea hex, numeric string, dst); kosong bila isNull
+	Value string `json:"value"`
+}
+
+// ExplorerColumn defines model for ExplorerColumn.
+type ExplorerColumn struct {
+	// DataType Tipe kanonik ternormalisasi
+	DataType    string  `json:"dataType"`
+	Default     *string `json:"default,omitempty"`
+	IsGenerated *bool   `json:"isGenerated,omitempty"`
+	IsIdentity  *bool   `json:"isIdentity,omitempty"`
+	Name        string  `json:"name"`
+	Nullable    bool    `json:"nullable"`
+	Ordinal     int     `json:"ordinal"`
+
+	// RawType Tipe mentah dari DBMS
+	RawType *string `json:"rawType,omitempty"`
+}
+
+// ExplorerConstraint defines model for ExplorerConstraint.
+type ExplorerConstraint struct {
+	Columns *[]string `json:"columns,omitempty"`
+
+	// Definition Hasil pg_get_constraintdef apa adanya
+	Definition *string                `json:"definition,omitempty"`
+	Name       string                 `json:"name"`
+	OnDelete   *string                `json:"onDelete,omitempty"`
+	OnUpdate   *string                `json:"onUpdate,omitempty"`
+	RefColumns *[]string              `json:"refColumns,omitempty"`
+	RefSchema  *string                `json:"refSchema,omitempty"`
+	RefTable   *string                `json:"refTable,omitempty"`
+	Type       ExplorerConstraintType `json:"type"`
+}
+
+// ExplorerConstraintType defines model for ExplorerConstraint.Type.
+type ExplorerConstraintType string
+
+// ExplorerDatabase defines model for ExplorerDatabase.
+type ExplorerDatabase struct {
+	Id       int64                `json:"id"`
+	IsActive bool                 `json:"isActive"`
+	Kind     ExplorerDatabaseKind `json:"kind"`
+	Level    AccessLevel          `json:"level"`
+	Name     string               `json:"name"`
+}
+
+// ExplorerDatabaseKind defines model for ExplorerDatabase.Kind.
+type ExplorerDatabaseKind string
+
+// ExplorerDatabaseDetail defines model for ExplorerDatabaseDetail.
+type ExplorerDatabaseDetail struct {
+	DatabaseName string                     `json:"databaseName"`
+	Host         string                     `json:"host"`
+	Id           int64                      `json:"id"`
+	IsActive     bool                       `json:"isActive"`
+	Kind         ExplorerDatabaseDetailKind `json:"kind"`
+	Level        AccessLevel                `json:"level"`
+	Name         string                     `json:"name"`
+	Port         int                        `json:"port"`
+	SslMode      SSLMode                    `json:"sslMode"`
+}
+
+// ExplorerDatabaseDetailKind defines model for ExplorerDatabaseDetail.Kind.
+type ExplorerDatabaseDetailKind string
+
+// ExplorerIndex defines model for ExplorerIndex.
+type ExplorerIndex struct {
+	Columns *[]string `json:"columns,omitempty"`
+
+	// Definition Hasil pg_get_indexdef apa adanya
+	Definition *string `json:"definition,omitempty"`
+	Method     *string `json:"method,omitempty"`
+	Name       string  `json:"name"`
+	Primary    bool    `json:"primary"`
+	Unique     bool    `json:"unique"`
+}
+
+// ExplorerRowsPage defines model for ExplorerRowsPage.
+type ExplorerRowsPage struct {
+	Columns       []string         `json:"columns"`
+	Limit         int              `json:"limit"`
+	Offset        int              `json:"offset"`
+	Rows          [][]ExplorerCell `json:"rows"`
+	TotalEstimate int64            `json:"totalEstimate"`
+}
+
+// ExplorerSchemaModel Model kanonik seluruh schema sebuah database (hasil normalisasi)
+type ExplorerSchemaModel struct {
+	Schemas []ExplorerSchemaObject `json:"schemas"`
+}
+
+// ExplorerSchemaObject defines model for ExplorerSchemaObject.
+type ExplorerSchemaObject struct {
+	Name   string          `json:"name"`
+	Tables []ExplorerTable `json:"tables"`
+}
+
+// ExplorerTable defines model for ExplorerTable.
+type ExplorerTable struct {
+	Columns     *[]ExplorerColumn     `json:"columns,omitempty"`
+	Constraints *[]ExplorerConstraint `json:"constraints,omitempty"`
+	Indexes     *[]ExplorerIndex      `json:"indexes,omitempty"`
+	Kind        ExplorerTableKind     `json:"kind"`
+	Name        string                `json:"name"`
+	RowEstimate int64                 `json:"rowEstimate"`
+	Schema      string                `json:"schema"`
+}
+
+// ExplorerTableKind defines model for ExplorerTable.Kind.
+type ExplorerTableKind string
+
+// ExplorerTableSummary defines model for ExplorerTableSummary.
+type ExplorerTableSummary struct {
+	Kind ExplorerTableSummaryKind `json:"kind"`
+	Name string                   `json:"name"`
+
+	// RowEstimate Perkiraan jumlah baris (reltuples; 0 bila belum pernah ANALYZE)
+	RowEstimate int64  `json:"rowEstimate"`
+	Schema      string `json:"schema"`
+}
+
+// ExplorerTableSummaryKind defines model for ExplorerTableSummary.Kind.
+type ExplorerTableSummaryKind string
 
 // Grant defines model for Grant.
 type Grant struct {
@@ -117,6 +398,69 @@ type Problem struct {
 // ProblemCode Kode error aplikasi
 type ProblemCode string
 
+// SSLMode defines model for SSLMode.
+type SSLMode string
+
+// SchemaDiffChange defines model for SchemaDiffChange.
+type SchemaDiffChange struct {
+	Column     *ExplorerColumn     `json:"column,omitempty"`
+	Constraint *ExplorerConstraint `json:"constraint,omitempty"`
+
+	// Destructive true untuk drop table/kolumn, pengetatan nullable, atau alter kolumn identitas
+	Destructive bool                 `json:"destructive"`
+	Index       *ExplorerIndex       `json:"index,omitempty"`
+	Kind        SchemaDiffChangeKind `json:"kind"`
+	Name        string               `json:"name"`
+	Previous    *ExplorerColumn      `json:"previous,omitempty"`
+	Schema      string               `json:"schema"`
+	Table       string               `json:"table"`
+	TableDef    *ExplorerTable       `json:"tableDef,omitempty"`
+}
+
+// SchemaDiffChangeKind defines model for SchemaDiffChange.Kind.
+type SchemaDiffChangeKind string
+
+// SchemaDiffRequest defines model for SchemaDiffRequest.
+type SchemaDiffRequest struct {
+	Against struct {
+		Id   int64                        `json:"id"`
+		Type SchemaDiffRequestAgainstType `json:"type"`
+	} `json:"against"`
+
+	// Direction Arah SQL yang dihasilkan; "toTarget" membuat databaseId menyamai against
+	Direction SchemaDiffRequestDirection `json:"direction"`
+}
+
+// SchemaDiffRequestAgainstType defines model for SchemaDiffRequest.Against.Type.
+type SchemaDiffRequestAgainstType string
+
+// SchemaDiffRequestDirection Arah SQL yang dihasilkan; "toTarget" membuat databaseId menyamai against
+type SchemaDiffRequestDirection string
+
+// SchemaDiffResult defines model for SchemaDiffResult.
+type SchemaDiffResult struct {
+	Changes []SchemaDiffChange `json:"changes"`
+
+	// Sql Statement urut aman dipisah ";\n"; kosong bila tanpa perubahan
+	Sql      string   `json:"sql"`
+	Warnings []string `json:"warnings"`
+}
+
+// SchemaNameList defines model for SchemaNameList.
+type SchemaNameList = []string
+
+// SchemaSnapshot defines model for SchemaSnapshot.
+type SchemaSnapshot struct {
+	DatabaseId     int64  `json:"databaseId"`
+	Id             int64  `json:"id"`
+	MigrationRunId *int64 `json:"migrationRunId,omitempty"`
+
+	// Model Model kanonik seluruh schema sebuah database (hasil normalisasi)
+	Model   ExplorerSchemaModel `json:"model"`
+	TakenAt time.Time           `json:"takenAt"`
+	TakenBy *int64              `json:"takenBy,omitempty"`
+}
+
 // User defines model for User.
 type User struct {
 	CreatedAt       time.Time `json:"createdAt"`
@@ -163,11 +507,29 @@ type Limit = int
 // Offset defines model for Offset.
 type Offset = int
 
+// OrderBy defines model for OrderBy.
+type OrderBy = string
+
+// OrderDir defines model for OrderDir.
+type OrderDir string
+
+// SchemaName defines model for SchemaName.
+type SchemaName = string
+
+// SnapshotId defines model for SnapshotId.
+type SnapshotId = int64
+
+// TableName defines model for TableName.
+type TableName = string
+
 // UserId defines model for UserId.
 type UserId = int64
 
 // Conflict defines model for Conflict.
 type Conflict = Problem
+
+// DBUnreachable defines model for DBUnreachable.
+type DBUnreachable = Problem
 
 // Forbidden defines model for Forbidden.
 type Forbidden = Problem
@@ -181,6 +543,12 @@ type Unauthenticated = Problem
 // ValidationFailed defines model for ValidationFailed.
 type ValidationFailed = Problem
 
+// GetApiAdminDatabasesParams defines parameters for GetApiAdminDatabases.
+type GetApiAdminDatabasesParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
 // GetApiAdminGroupsParams defines parameters for GetApiAdminGroups.
 type GetApiAdminGroupsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
@@ -192,6 +560,25 @@ type GetApiAdminUsersParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
 }
+
+// GetApiDatabasesDatabaseIdSchemasSchemaNameTablesTableNameRowsParams defines parameters for GetApiDatabasesDatabaseIdSchemasSchemaNameTablesTableNameRows.
+type GetApiDatabasesDatabaseIdSchemasSchemaNameTablesTableNameRowsParams struct {
+	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
+
+	// OrderBy Harus salah satu nama kolom tabel (ditolak driver bila bukan)
+	OrderBy  *OrderBy  `form:"orderBy,omitempty" json:"orderBy,omitempty"`
+	OrderDir *OrderDir `form:"orderDir,omitempty" json:"orderDir,omitempty"`
+}
+
+// PostApiAdminDatabasesJSONRequestBody defines body for PostApiAdminDatabases for application/json ContentType.
+type PostApiAdminDatabasesJSONRequestBody = DatabaseConnectionCreate
+
+// PostApiAdminDatabasesTestJSONRequestBody defines body for PostApiAdminDatabasesTest for application/json ContentType.
+type PostApiAdminDatabasesTestJSONRequestBody = DatabaseConnectionTestRequest
+
+// PatchApiAdminDatabasesDatabaseIdJSONRequestBody defines body for PatchApiAdminDatabasesDatabaseId for application/json ContentType.
+type PatchApiAdminDatabasesDatabaseIdJSONRequestBody = DatabaseConnectionUpdate
 
 // PostApiAdminGroupsJSONRequestBody defines body for PostApiAdminGroups for application/json ContentType.
 type PostApiAdminGroupsJSONRequestBody = GroupCreate
@@ -213,3 +600,68 @@ type PostApiAdminUsersUserIdPasswordJSONRequestBody = PasswordReset
 
 // PostApiAuthLoginJSONRequestBody defines body for PostApiAuthLogin for application/json ContentType.
 type PostApiAuthLoginJSONRequestBody = LoginRequest
+
+// PostApiDatabasesDatabaseIdSchemaDiffJSONRequestBody defines body for PostApiDatabasesDatabaseIdSchemaDiff for application/json ContentType.
+type PostApiDatabasesDatabaseIdSchemaDiffJSONRequestBody = SchemaDiffRequest
+
+// AsDatabaseConnectionCreate returns the union data inside the DatabaseConnectionTestRequest as a DatabaseConnectionCreate
+func (t DatabaseConnectionTestRequest) AsDatabaseConnectionCreate() (DatabaseConnectionCreate, error) {
+	var body DatabaseConnectionCreate
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDatabaseConnectionCreate overwrites any union data inside the DatabaseConnectionTestRequest as the provided DatabaseConnectionCreate
+func (t *DatabaseConnectionTestRequest) FromDatabaseConnectionCreate(v DatabaseConnectionCreate) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDatabaseConnectionCreate performs a merge with any union data inside the DatabaseConnectionTestRequest, using the provided DatabaseConnectionCreate
+func (t *DatabaseConnectionTestRequest) MergeDatabaseConnectionCreate(v DatabaseConnectionCreate) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+// AsDatabaseConnectionTestRequest1 returns the union data inside the DatabaseConnectionTestRequest as a DatabaseConnectionTestRequest1
+func (t DatabaseConnectionTestRequest) AsDatabaseConnectionTestRequest1() (DatabaseConnectionTestRequest1, error) {
+	var body DatabaseConnectionTestRequest1
+	err := json.Unmarshal(t.union, &body)
+	return body, err
+}
+
+// FromDatabaseConnectionTestRequest1 overwrites any union data inside the DatabaseConnectionTestRequest as the provided DatabaseConnectionTestRequest1
+func (t *DatabaseConnectionTestRequest) FromDatabaseConnectionTestRequest1(v DatabaseConnectionTestRequest1) error {
+	b, err := json.Marshal(v)
+	t.union = b
+	return err
+}
+
+// MergeDatabaseConnectionTestRequest1 performs a merge with any union data inside the DatabaseConnectionTestRequest, using the provided DatabaseConnectionTestRequest1
+func (t *DatabaseConnectionTestRequest) MergeDatabaseConnectionTestRequest1(v DatabaseConnectionTestRequest1) error {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+
+	merged, err := runtime.JSONMerge(t.union, b)
+	t.union = merged
+	return err
+}
+
+func (t DatabaseConnectionTestRequest) MarshalJSON() ([]byte, error) {
+	b, err := t.union.MarshalJSON()
+	return b, err
+}
+
+func (t *DatabaseConnectionTestRequest) UnmarshalJSON(b []byte) error {
+	err := t.union.UnmarshalJSON(b)
+	return err
+}
