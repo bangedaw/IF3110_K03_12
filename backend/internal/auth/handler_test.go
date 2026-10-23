@@ -1,0 +1,225 @@
+package auth
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apigen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/httpx"
+)
+
+func newTestRouter(svc *Service) http.Handler {
+	r := httpx.NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	r.Route("/api", func(api chi.Router) { Routes(api, svc) })
+	return r
+}
+
+func request(t *testing.T, h http.Handler, method, path, body string, cookie *http.Cookie, csrf ...string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, strings.NewReader(body))
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	if len(csrf) > 0 {
+		req.Header.Set(CSRFHeader, csrf[0])
+	}
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func sessionCookie(t *testing.T, rec *httptest.ResponseRecorder) *http.Cookie {
+	t.Helper()
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == CookieName {
+			return c
+		}
+	}
+	return nil
+}
+
+func TestLoginHandlerSetsSecureCookie(t *testing.T) {
+	svc, pool, _ := newTestService(t)
+	createUser(t, pool, "alice", "rahasia123", true)
+	h := newTestRouter(svc)
+
+	rec := request(t, h, http.MethodPost, "/api/auth/login", `{"username":"alice","password":"rahasia123"}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+
+	c := sessionCookie(t, rec)
+	require.NotNil(t, c)
+	assert.True(t, c.HttpOnly)
+	assert.Equal(t, http.SameSiteLaxMode, c.SameSite)
+	assert.Equal(t, "/", c.Path)
+	assert.False(t, c.Secure)
+	assert.InDelta(t, testSessionCfg.AbsoluteTimeout.Seconds(), float64(c.MaxAge), 1)
+
+	body := rec.Body.String()
+	assert.NotContains(t, body, c.Value)
+	assert.NotContains(t, body, "rahasia123")
+	assert.NotContains(t, body, "argon2id")
+	var got apigen.AuthSession
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	assert.Equal(t, "alice", got.User.Username)
+}
+
+func TestLoginHandlerSecureFlagInProduction(t *testing.T) {
+	svc, pool, _ := newTestService(t)
+	svc.secure = true
+	createUser(t, pool, "alice", "rahasia123", true)
+
+	rec := request(t, newTestRouter(svc), http.MethodPost, "/api/auth/login", `{"username":"alice","password":"rahasia123"}`, nil)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.True(t, sessionCookie(t, rec).Secure)
+}
+
+func TestLoginHandlerFailures(t *testing.T) {
+	svc, pool, _ := newTestService(t)
+	createUser(t, pool, "alice", "rahasia123", true)
+	h := newTestRouter(svc)
+
+	cases := []struct {
+		body   string
+		status int
+	}{
+		{`{"username":"alice","password":"salah"}`, http.StatusUnauthorized},
+		{`{"username":"tidakada","password":"x"}`, http.StatusUnauthorized},
+		{`{"username":"","password":""}`, http.StatusUnprocessableEntity},
+		{`bukan json`, http.StatusUnprocessableEntity},
+	}
+	for _, tc := range cases {
+		rec := request(t, h, http.MethodPost, "/api/auth/login", tc.body, nil)
+		assert.Equal(t, tc.status, rec.Code, tc.body)
+		assert.Nil(t, sessionCookie(t, rec), tc.body)
+	}
+}
+
+func TestMeAndLogout(t *testing.T) {
+	svc, pool, _ := newTestService(t)
+	createUser(t, pool, "alice", "rahasia123", true)
+	h := newTestRouter(svc)
+
+	assert.Equal(t, http.StatusUnauthorized, request(t, h, http.MethodGet, "/api/auth/me", "", nil).Code)
+
+	c := sessionCookie(t, request(t, h, http.MethodPost, "/api/auth/login", `{"username":"alice","password":"rahasia123"}`, nil))
+	require.NotNil(t, c)
+
+	rec := request(t, h, http.MethodGet, "/api/auth/me", "", c)
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"username":"alice"`)
+
+	rec = request(t, h, http.MethodPost, "/api/auth/logout", "", c, csrfFrom(t, rec))
+	require.Equal(t, http.StatusNoContent, rec.Code)
+	assert.Equal(t, -1, sessionCookie(t, rec).MaxAge)
+
+	rec = request(t, h, http.MethodGet, "/api/auth/me", "", c)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Equal(t, -1, sessionCookie(t, rec).MaxAge)
+}
+
+func TestMiddlewareRotatesCookie(t *testing.T) {
+	svc, pool, clk := newTestService(t)
+	createUser(t, pool, "alice", "rahasia123", true)
+	h := newTestRouter(svc)
+	old := sessionCookie(t, request(t, h, http.MethodPost, "/api/auth/login", `{"username":"alice","password":"rahasia123"}`, nil))
+
+	clk.advance(testSessionCfg.RotationInterval)
+	rec := request(t, h, http.MethodGet, "/api/auth/me", "", old)
+	require.Equal(t, http.StatusOK, rec.Code)
+	fresh := sessionCookie(t, rec)
+	require.NotNil(t, fresh)
+	assert.Equal(t, CookieName, fresh.Name)
+	assert.NotEqual(t, old.Value, fresh.Value)
+
+	assert.Equal(t, http.StatusOK, request(t, h, http.MethodGet, "/api/auth/me", "", old).Code)
+	clk.advance(testSessionCfg.GracePeriod + time.Second)
+	assert.Equal(t, http.StatusUnauthorized, request(t, h, http.MethodGet, "/api/auth/me", "", old).Code)
+	assert.Equal(t, http.StatusOK, request(t, h, http.MethodGet, "/api/auth/me", "", fresh).Code)
+}
+
+func csrfFrom(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var got apigen.AuthSession
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.NotEmpty(t, got.CsrfToken)
+	return got.CsrfToken
+}
+
+func TestCSRF(t *testing.T) {
+	svc, pool, clk := newTestService(t)
+	createUser(t, pool, "alice", "rahasia123", true)
+	h := newTestRouter(svc)
+	loginBody := `{"username":"alice","password":"rahasia123"}`
+
+	loginRec := request(t, h, http.MethodPost, "/api/auth/login", loginBody, nil)
+	c := sessionCookie(t, loginRec)
+	token := csrfFrom(t, loginRec)
+	assert.NotContains(t, token, c.Value)
+
+	meRec := request(t, h, http.MethodGet, "/api/auth/me", "", c)
+	require.Equal(t, http.StatusOK, meRec.Code)
+	assert.Equal(t, token, csrfFrom(t, meRec))
+
+	clk.advance(testSessionCfg.RotationInterval)
+	rotatedRec := request(t, h, http.MethodGet, "/api/auth/me", "", c)
+	require.NotNil(t, sessionCookie(t, rotatedRec))
+	assert.Equal(t, token, csrfFrom(t, rotatedRec))
+	c = sessionCookie(t, rotatedRec)
+
+	other := csrfFrom(t, request(t, h, http.MethodPost, "/api/auth/login", loginBody, nil))
+	assert.NotEqual(t, token, other)
+
+	for _, bad := range [][]string{nil, {""}, {"salah"}, {other}} {
+		rec := request(t, h, http.MethodPost, "/api/auth/logout", "", c, bad...)
+		require.Equal(t, http.StatusForbidden, rec.Code, bad)
+		assert.Contains(t, rec.Body.String(), `"code":"CSRF_INVALID"`)
+	}
+
+	assert.Equal(t, http.StatusNoContent, request(t, h, http.MethodPost, "/api/auth/logout", "", c, token).Code)
+}
+
+func TestLoginIsAudited(t *testing.T) {
+	svc, pool, _ := newTestService(t)
+	id := createUser(t, pool, "alice", "rahasia123", true)
+	h := newTestRouter(svc)
+
+	request(t, h, http.MethodPost, "/api/auth/login", `{"username":"alice","password":"salahsekali"}`, nil)
+	request(t, h, http.MethodPost, "/api/auth/login", `{"username":"alice","password":"rahasia123"}`, nil)
+
+	rows, err := pool.Query(context.Background(),
+		`SELECT outcome, actor_user_id, metadata::text FROM audit_logs WHERE action = 'auth.login' ORDER BY id`)
+	require.NoError(t, err)
+	type row struct {
+		outcome string
+		actor   *int64
+		meta    string
+	}
+	var got []row
+	for rows.Next() {
+		var r row
+		require.NoError(t, rows.Scan(&r.outcome, &r.actor, &r.meta))
+		got = append(got, r)
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, got, 2)
+	assert.Equal(t, "failure", got[0].outcome)
+	assert.Nil(t, got[0].actor)
+	assert.Equal(t, "success", got[1].outcome)
+	assert.Equal(t, id, *got[1].actor)
+	for _, r := range got {
+		assert.Contains(t, r.meta, "alice")
+		assert.NotContains(t, r.meta, "rahasia123")
+		assert.NotContains(t, r.meta, "salahsekali")
+	}
+}

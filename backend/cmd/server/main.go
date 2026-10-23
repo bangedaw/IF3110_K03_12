@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,10 +14,22 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/admin"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/auth"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/config"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbconn"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/explorer"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/httpx"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/web"
+
+	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/mysql"
+	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres"
 )
 
 func main() {
@@ -46,18 +59,13 @@ func run() error {
 		return err
 	}
 
-	r := httpx.NewRouter(logger)
-	r.Route("/api", func(api chi.Router) {
-		api.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
-			if err := pool.Ping(r.Context()); err != nil {
-				httpx.Error(w, r, apperr.Wrap(apperr.CodeDBUnreachable, "platform DB tidak terjangkau", err))
-				return
-			}
-			httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
-		})
-	})
+	handler, cleanup, err := newHandler(cfg, pool, logger, web.Dist())
+	if err != nil {
+		return err
+	}
+	defer cleanup()
 
-	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: r, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: cfg.HTTPAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("listening", "addr", cfg.HTTPAddr, "env", cfg.Env)
@@ -74,4 +82,40 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	return srv.Shutdown(shutdownCtx)
+}
+
+func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, spa fs.FS) (http.Handler, func(), error) {
+	cipher, err := secret.New(cfg.SecretKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	store := &dbconn.SQLStore{Q: gen.New(pool)}
+	registry := dbconn.NewRegistry(store, cipher)
+	auditLog := audit.New(pool)
+	az := audit.RecordDenied(authz.NewDBAuthorizer(pool), auditLog)
+	authSvc := auth.NewService(pool, cfg.Session, cfg.CSRFKey, cfg.IsProduction())
+
+	r := httpx.NewRouter(logger)
+	r.Route("/api", func(api chi.Router) {
+		api.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+			if err := pool.Ping(r.Context()); err != nil {
+				httpx.Error(w, r, apperr.Wrap(apperr.CodeDBUnreachable, "platform DB tidak terjangkau", err))
+				return
+			}
+			httpx.JSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		})
+
+		auth.Routes(api, authSvc)
+
+		api.Group(func(p chi.Router) {
+			p.Use(authSvc.Middleware)
+			admin.Routes(p, admin.NewService(pool, az, auditLog))
+			dbconn.Routes(p, dbconn.NewService(store, registry, cipher, az))
+			explorer.Routes(p, explorer.NewService(store, registry, az))
+		})
+	})
+	if h, ok := web.Handler(spa); ok {
+		r.Handle("/*", h)
+	}
+	return r, registry.Close, nil
 }

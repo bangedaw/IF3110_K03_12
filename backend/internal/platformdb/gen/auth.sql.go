@@ -7,7 +7,100 @@ package gen
 
 import (
 	"context"
+	"net/netip"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
+
+const createSessionFamily = `-- name: CreateSessionFamily :exec
+INSERT INTO session_families (id, user_id, created_at, absolute_expires_at, last_seen_at, last_rotated_at, user_agent, ip)
+VALUES ($1, $2, $3, $4, $3, $3, $5, $6)
+`
+
+type CreateSessionFamilyParams struct {
+	ID                pgtype.UUID
+	UserID            int64
+	Now               pgtype.Timestamptz
+	AbsoluteExpiresAt pgtype.Timestamptz
+	UserAgent         pgtype.Text
+	Ip                *netip.Addr
+}
+
+func (q *Queries) CreateSessionFamily(ctx context.Context, arg CreateSessionFamilyParams) error {
+	_, err := q.db.Exec(ctx, createSessionFamily,
+		arg.ID,
+		arg.UserID,
+		arg.Now,
+		arg.AbsoluteExpiresAt,
+		arg.UserAgent,
+		arg.Ip,
+	)
+	return err
+}
+
+const createSessionToken = `-- name: CreateSessionToken :exec
+INSERT INTO session_tokens (token_hash, family_id, issued_at)
+VALUES ($1, $2, $3)
+`
+
+type CreateSessionTokenParams struct {
+	TokenHash []byte
+	FamilyID  pgtype.UUID
+	Now       pgtype.Timestamptz
+}
+
+func (q *Queries) CreateSessionToken(ctx context.Context, arg CreateSessionTokenParams) error {
+	_, err := q.db.Exec(ctx, createSessionToken, arg.TokenHash, arg.FamilyID, arg.Now)
+	return err
+}
+
+const getSessionByTokenHash = `-- name: GetSessionByTokenHash :one
+SELECT t.family_id,
+       t.superseded_at,
+       f.user_id,
+       f.absolute_expires_at,
+       f.last_seen_at,
+       f.last_rotated_at,
+       f.rotate_required,
+       f.revoked_at,
+       u.is_active,
+       u.is_platform_admin
+FROM session_tokens t
+         JOIN session_families f ON f.id = t.family_id
+         JOIN users u ON u.id = f.user_id
+WHERE t.token_hash = $1
+`
+
+type GetSessionByTokenHashRow struct {
+	FamilyID          pgtype.UUID
+	SupersededAt      pgtype.Timestamptz
+	UserID            int64
+	AbsoluteExpiresAt pgtype.Timestamptz
+	LastSeenAt        pgtype.Timestamptz
+	LastRotatedAt     pgtype.Timestamptz
+	RotateRequired    bool
+	RevokedAt         pgtype.Timestamptz
+	IsActive          bool
+	IsPlatformAdmin   bool
+}
+
+func (q *Queries) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (GetSessionByTokenHashRow, error) {
+	row := q.db.QueryRow(ctx, getSessionByTokenHash, tokenHash)
+	var i GetSessionByTokenHashRow
+	err := row.Scan(
+		&i.FamilyID,
+		&i.SupersededAt,
+		&i.UserID,
+		&i.AbsoluteExpiresAt,
+		&i.LastSeenAt,
+		&i.LastRotatedAt,
+		&i.RotateRequired,
+		&i.RevokedAt,
+		&i.IsActive,
+		&i.IsPlatformAdmin,
+	)
+	return i, err
+}
 
 const getUserByID = `-- name: GetUserByID :one
 SELECT id, username, display_name, password_hash, is_platform_admin, is_active, created_at, updated_at FROM users WHERE id = $1
@@ -47,4 +140,107 @@ func (q *Queries) GetUserByUsername(ctx context.Context, username string) (User,
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const markSessionRotated = `-- name: MarkSessionRotated :exec
+UPDATE session_families
+SET last_rotated_at = $1,
+    last_seen_at    = $1,
+    rotate_required = FALSE
+WHERE id = $2
+`
+
+type MarkSessionRotatedParams struct {
+	Now pgtype.Timestamptz
+	ID  pgtype.UUID
+}
+
+func (q *Queries) MarkSessionRotated(ctx context.Context, arg MarkSessionRotatedParams) error {
+	_, err := q.db.Exec(ctx, markSessionRotated, arg.Now, arg.ID)
+	return err
+}
+
+const revokeSessionFamily = `-- name: RevokeSessionFamily :exec
+UPDATE session_families SET revoked_at = $1 WHERE id = $2 AND revoked_at IS NULL
+`
+
+type RevokeSessionFamilyParams struct {
+	Now pgtype.Timestamptz
+	ID  pgtype.UUID
+}
+
+func (q *Queries) RevokeSessionFamily(ctx context.Context, arg RevokeSessionFamilyParams) error {
+	_, err := q.db.Exec(ctx, revokeSessionFamily, arg.Now, arg.ID)
+	return err
+}
+
+const revokeUserSessions = `-- name: RevokeUserSessions :exec
+UPDATE session_families SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL
+`
+
+type RevokeUserSessionsParams struct {
+	Now    pgtype.Timestamptz
+	UserID int64
+}
+
+func (q *Queries) RevokeUserSessions(ctx context.Context, arg RevokeUserSessionsParams) error {
+	_, err := q.db.Exec(ctx, revokeUserSessions, arg.Now, arg.UserID)
+	return err
+}
+
+const supersedeSessionToken = `-- name: SupersedeSessionToken :execrows
+UPDATE session_tokens
+SET superseded_at = $1
+WHERE token_hash = $2
+  AND superseded_at IS NULL
+`
+
+type SupersedeSessionTokenParams struct {
+	Now       pgtype.Timestamptz
+	TokenHash []byte
+}
+
+func (q *Queries) SupersedeSessionToken(ctx context.Context, arg SupersedeSessionTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, supersedeSessionToken, arg.Now, arg.TokenHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const touchSessionFamily = `-- name: TouchSessionFamily :exec
+UPDATE session_families SET last_seen_at = $1 WHERE id = $2
+`
+
+type TouchSessionFamilyParams struct {
+	Now pgtype.Timestamptz
+	ID  pgtype.UUID
+}
+
+func (q *Queries) TouchSessionFamily(ctx context.Context, arg TouchSessionFamilyParams) error {
+	_, err := q.db.Exec(ctx, touchSessionFamily, arg.Now, arg.ID)
+	return err
+}
+
+const upsertPlatformAdmin = `-- name: UpsertPlatformAdmin :one
+INSERT INTO users (username, password_hash, is_platform_admin, is_active)
+VALUES ($1, $2, TRUE, TRUE)
+ON CONFLICT (username) DO UPDATE
+    SET password_hash     = EXCLUDED.password_hash,
+        is_platform_admin = TRUE,
+        is_active         = TRUE,
+        updated_at        = now()
+RETURNING id
+`
+
+type UpsertPlatformAdminParams struct {
+	Username     string
+	PasswordHash string
+}
+
+func (q *Queries) UpsertPlatformAdmin(ctx context.Context, arg UpsertPlatformAdminParams) (int64, error) {
+	row := q.db.QueryRow(ctx, upsertPlatformAdmin, arg.Username, arg.PasswordHash)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
