@@ -84,3 +84,31 @@ func TestRecoverReturnsProblem(t *testing.T) {
 	assert.Equal(t, 500, rec.Code)
 	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
 }
+
+func TestCrossOriginRequestRejected(t *testing.T) {
+	r := NewRouter(slog.New(slog.NewJSONHandler(&bytes.Buffer{}, nil)))
+	r.Post("/api/x", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })
+	r.Get("/api/x", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(204) })
+
+	cases := []struct {
+		method, site string
+		status       int
+	}{
+		{http.MethodPost, "cross-site", http.StatusForbidden},
+		{http.MethodPost, "same-origin", http.StatusNoContent},
+		{http.MethodPost, "", http.StatusNoContent},
+		{http.MethodGet, "cross-site", http.StatusNoContent},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, "/api/x", nil)
+		if tc.site != "" {
+			req.Header.Set("Sec-Fetch-Site", tc.site)
+		}
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		assert.Equal(t, tc.status, rec.Code, tc)
+		if tc.status == http.StatusForbidden {
+			assert.Contains(t, rec.Body.String(), `"code":"CSRF_INVALID"`)
+		}
+	}
+}

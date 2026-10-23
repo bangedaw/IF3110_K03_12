@@ -23,15 +23,16 @@ import (
 var errInvalidCredentials = apperr.New(apperr.CodeUnauthenticated, "username atau password salah")
 
 type Service struct {
-	pool   *pgxpool.Pool
-	q      *gen.Queries
-	cfg    config.Session
-	secure bool
-	now    func() time.Time
+	pool    *pgxpool.Pool
+	q       *gen.Queries
+	cfg     config.Session
+	csrfKey []byte
+	secure  bool
+	now     func() time.Time
 }
 
-func NewService(pool *pgxpool.Pool, cfg config.Session, secureCookie bool) *Service {
-	return &Service{pool: pool, q: gen.New(pool), cfg: cfg, secure: secureCookie, now: time.Now}
+func NewService(pool *pgxpool.Pool, cfg config.Session, csrfKey string, secureCookie bool) *Service {
+	return &Service{pool: pool, q: gen.New(pool), cfg: cfg, csrfKey: []byte(csrfKey), secure: secureCookie, now: time.Now}
 }
 
 type Session struct {

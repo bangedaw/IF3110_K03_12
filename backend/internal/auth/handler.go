@@ -39,6 +39,10 @@ func (s *Service) Middleware(next http.Handler) http.Handler {
 		if sess.NewToken != "" {
 			s.setCookie(w, sess.NewToken, sess.ExpiresAt)
 		}
+		if !safeMethod(r.Method) && !s.validCSRF(sess.FamilyID, r.Header.Get(CSRFHeader)) {
+			httpx.Error(w, r, apperr.New(apperr.CodeCSRFInvalid, "token CSRF tidak valid"))
+			return
+		}
 		ctx := withFamily(WithPrincipal(r.Context(), sess.Principal), sess.FamilyID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -66,7 +70,7 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.setCookie(w, sess.NewToken, sess.ExpiresAt)
-	httpx.JSON(w, http.StatusOK, apigen.AuthSession{User: toAPIUser(user)})
+	httpx.JSON(w, http.StatusOK, apigen.AuthSession{User: toAPIUser(user), CsrfToken: s.csrfToken(sess.FamilyID)})
 }
 
 func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -81,12 +85,13 @@ func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) handleMe(w http.ResponseWriter, r *http.Request) {
 	p, _ := PrincipalFrom(r.Context())
+	id, _ := familyFrom(r.Context())
 	user, err := s.q.GetUserByID(r.Context(), p.UserID)
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, apigen.AuthSession{User: toAPIUser(user)})
+	httpx.JSON(w, http.StatusOK, apigen.AuthSession{User: toAPIUser(user), CsrfToken: s.csrfToken(id)})
 }
 
 func (s *Service) setCookie(w http.ResponseWriter, token string, expires time.Time) {

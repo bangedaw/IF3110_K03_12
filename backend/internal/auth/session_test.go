@@ -45,7 +45,7 @@ func newTestService(t *testing.T) (*Service, *pgxpool.Pool, *clock) {
 	pool := testutil.NewPlatformDB(t)
 	t.Cleanup(pool.Close)
 	clk := &clock{t: time.Date(2026, 10, 24, 9, 0, 0, 0, time.UTC)}
-	svc := NewService(pool, testSessionCfg, false)
+	svc := NewService(pool, testSessionCfg, "test-csrf-key", false)
 	svc.now = clk.now
 	return svc, pool, clk
 }

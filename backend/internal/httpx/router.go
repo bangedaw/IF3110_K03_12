@@ -15,7 +15,11 @@ import (
 
 func NewRouter(logger *slog.Logger) chi.Router {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, Logger(logger), Recover(logger))
+	cop := http.NewCrossOriginProtection()
+	cop.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		Error(w, r, apperr.New(apperr.CodeCSRFInvalid, "request lintas origin ditolak"))
+	}))
+	r.Use(middleware.RequestID, Logger(logger), Recover(logger), cop.Handler)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		Error(w, r, apperr.New(apperr.CodeNotFound, "endpoint tidak ditemukan"))
 	})

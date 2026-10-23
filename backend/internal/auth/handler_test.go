@@ -24,11 +24,14 @@ func newTestRouter(svc *Service) http.Handler {
 	return r
 }
 
-func request(t *testing.T, h http.Handler, method, path, body string, cookie *http.Cookie) *httptest.ResponseRecorder {
+func request(t *testing.T, h http.Handler, method, path, body string, cookie *http.Cookie, csrf ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if cookie != nil {
 		req.AddCookie(cookie)
+	}
+	if len(csrf) > 0 {
+		req.Header.Set(CSRFHeader, csrf[0])
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -115,7 +118,7 @@ func TestMeAndLogout(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	assert.Contains(t, rec.Body.String(), `"username":"alice"`)
 
-	rec = request(t, h, http.MethodPost, "/api/auth/logout", "", c)
+	rec = request(t, h, http.MethodPost, "/api/auth/logout", "", c, csrfFrom(t, rec))
 	require.Equal(t, http.StatusNoContent, rec.Code)
 	assert.Equal(t, -1, sessionCookie(t, rec).MaxAge)
 
@@ -142,4 +145,45 @@ func TestMiddlewareRotatesCookie(t *testing.T) {
 	clk.advance(testSessionCfg.GracePeriod + time.Second)
 	assert.Equal(t, http.StatusUnauthorized, request(t, h, http.MethodGet, "/api/auth/me", "", old).Code)
 	assert.Equal(t, http.StatusOK, request(t, h, http.MethodGet, "/api/auth/me", "", fresh).Code)
+}
+
+func csrfFrom(t *testing.T, rec *httptest.ResponseRecorder) string {
+	t.Helper()
+	var got apigen.AuthSession
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
+	require.NotEmpty(t, got.CsrfToken)
+	return got.CsrfToken
+}
+
+func TestCSRF(t *testing.T) {
+	svc, pool, clk := newTestService(t)
+	createUser(t, pool, "alice", "rahasia123", true)
+	h := newTestRouter(svc)
+	loginBody := `{"username":"alice","password":"rahasia123"}`
+
+	loginRec := request(t, h, http.MethodPost, "/api/auth/login", loginBody, nil)
+	c := sessionCookie(t, loginRec)
+	token := csrfFrom(t, loginRec)
+	assert.NotContains(t, token, c.Value)
+
+	meRec := request(t, h, http.MethodGet, "/api/auth/me", "", c)
+	require.Equal(t, http.StatusOK, meRec.Code)
+	assert.Equal(t, token, csrfFrom(t, meRec))
+
+	clk.advance(testSessionCfg.RotationInterval)
+	rotatedRec := request(t, h, http.MethodGet, "/api/auth/me", "", c)
+	require.NotNil(t, sessionCookie(t, rotatedRec))
+	assert.Equal(t, token, csrfFrom(t, rotatedRec))
+	c = sessionCookie(t, rotatedRec)
+
+	other := csrfFrom(t, request(t, h, http.MethodPost, "/api/auth/login", loginBody, nil))
+	assert.NotEqual(t, token, other)
+
+	for _, bad := range [][]string{nil, {""}, {"salah"}, {other}} {
+		rec := request(t, h, http.MethodPost, "/api/auth/logout", "", c, bad...)
+		require.Equal(t, http.StatusForbidden, rec.Code, bad)
+		assert.Contains(t, rec.Body.String(), `"code":"CSRF_INVALID"`)
+	}
+
+	assert.Equal(t, http.StatusNoContent, request(t, h, http.MethodPost, "/api/auth/logout", "", c, token).Code)
 }
