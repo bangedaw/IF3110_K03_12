@@ -53,7 +53,6 @@ func mysqlSnapshot(t *testing.T, cfg dbms.ConnConfig) *schema.Model {
 }
 
 var mysqlMutations = []string{
-
 	`CREATE TABLE shipments (
 		id         BIGINT AUTO_INCREMENT PRIMARY KEY,
 		order_id   BIGINT NOT NULL,

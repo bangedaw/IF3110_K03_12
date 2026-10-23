@@ -163,7 +163,6 @@ func TestDiff_ColumnDefaultChanged(t *testing.T) {
 }
 
 func TestDiff_RawTypeOnlyIsNotAChange(t *testing.T) {
-
 	before := schema.Column{Name: "id", DataType: "bigint", RawType: "int8"}
 	after := schema.Column{Name: "id", DataType: "bigint", RawType: "bigint"}
 
@@ -250,7 +249,6 @@ func TestDiff_SchemaAddedAndRemoved(t *testing.T) {
 }
 
 func TestDiff_EmissionOrder(t *testing.T) {
-
 	oldIdx := schema.Index{Name: "i_old", Definition: "CREATE INDEX i_old ON books USING btree (a)"}
 	newIdx := schema.Index{Name: "i_new", Definition: "CREATE INDEX i_new ON books USING btree (b)"}
 	oldC := schema.Constraint{Name: "c_old", Type: schema.ConstraintCheck, Definition: "CHECK (a > 0)"}
@@ -267,7 +265,6 @@ func TestDiff_EmissionOrder(t *testing.T) {
 }
 
 func TestDiff_NilModels(t *testing.T) {
-
 	b := mdl(tbl("books", col("id", "bigint")))
 	if got := Diff(nil, b); len(got) != 1 || got[0].Kind != KindAddTable {
 		t.Fatalf("Diff(nil, model) = %v, want satu add_table", kinds(got))

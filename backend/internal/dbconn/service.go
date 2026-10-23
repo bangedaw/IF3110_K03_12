@@ -208,7 +208,6 @@ func (s *Service) Update(ctx context.Context, p authz.Principal, id int64, in Pa
 		return nil, err
 	}
 	if updatePassword {
-
 		s.registry.Invalidate(id)
 	}
 	out := toAPI(row)

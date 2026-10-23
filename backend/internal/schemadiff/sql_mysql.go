@@ -151,7 +151,6 @@ func (g *myGen) addTable(c Change) []stmt {
 	var defs []string
 	for _, col := range c.TableDef.Columns {
 		if col.IsGenerated {
-
 			continue
 		}
 		defs = append(defs, "  "+myColumnDef(col))

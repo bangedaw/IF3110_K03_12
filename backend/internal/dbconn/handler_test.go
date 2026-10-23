@@ -342,7 +342,6 @@ func TestUnauthenticatedWithoutPrincipal(t *testing.T) {
 }
 
 func TestLatencyIsSaneAndNotLeaky(t *testing.T) {
-
 	srv, _, _ := setup(t)
 	input := validInput()
 	input["host"] = "127.0.0.1"

@@ -282,7 +282,6 @@ WHERE tc.TABLE_SCHEMA = ? AND tc.TABLE_NAME = ? AND tc.CONSTRAINT_TYPE = 'CHECK'
 			return nil, fmt.Errorf("baca constraint check: %w", err)
 		}
 		if p, ok := byName[name]; ok {
-
 			p.Definition = "CHECK " + clause
 		}
 	}

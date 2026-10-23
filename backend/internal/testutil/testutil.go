@@ -80,7 +80,6 @@ func NewMySQLTarget(t *testing.T) *sql.DB {
 func MySQLTargetConfig(t *testing.T) MySQLTarget {
 	t.Helper()
 	if dsn := os.Getenv("TEST_MYSQL_URL"); dsn != "" {
-
 		t.Skip("TEST_MYSQL_URL tidak menyediakan parameter host/port untuk Driver.Open")
 	}
 
@@ -272,7 +271,6 @@ func uniqueName(prefix string) string {
 }
 
 func replaceDatabase(dsn, name string) string {
-
 	for i := len(dsn) - 1; i >= 0; i-- {
 		if dsn[i] == '/' {
 			return dsn[:i+1] + name
