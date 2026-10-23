@@ -91,6 +91,8 @@ func TestServerWiring(t *testing.T) {
 	admin := &client{t: t, h: h}
 	admin.login("admin")
 	assert.Equal(t, http.StatusOK, admin.do(http.MethodGet, "/api/admin/databases", "").Code)
+	assert.Equal(t, http.StatusOK, admin.do(http.MethodGet, "/api/admin/users", "").Code)
+	assert.Equal(t, http.StatusForbidden, alice.do(http.MethodGet, "/api/admin/users", "").Code)
 
 	body := `{"name":"x","kind":"postgres","host":"localhost","port":1,"database":"x","username":"x","password":"x"}`
 	csrf := admin.csrf

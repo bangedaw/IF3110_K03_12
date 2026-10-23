@@ -13,7 +13,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/admin"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/auth"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/config"
@@ -87,7 +89,8 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 	}
 	store := &dbconn.SQLStore{Q: gen.New(pool)}
 	registry := dbconn.NewRegistry(store, cipher)
-	az := authz.NewDBAuthorizer(pool)
+	auditLog := audit.New(pool)
+	az := audit.RecordDenied(authz.NewDBAuthorizer(pool), auditLog)
 	authSvc := auth.NewService(pool, cfg.Session, cfg.CSRFKey, cfg.IsProduction())
 
 	r := httpx.NewRouter(logger)
@@ -104,6 +107,7 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 
 		api.Group(func(p chi.Router) {
 			p.Use(authSvc.Middleware)
+			admin.Routes(p, admin.NewService(pool, az, auditLog))
 			dbconn.Routes(p, dbconn.NewService(store, registry, cipher, az))
 			explorer.Routes(p, explorer.NewService(store, registry, az))
 		})
