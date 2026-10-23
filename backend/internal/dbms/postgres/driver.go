@@ -43,12 +43,12 @@ func (Driver) Open(ctx context.Context, cfg dbms.ConnConfig) (dbms.Conn, error) 
 		pool.Close()
 		return nil, sanitize(cfg, err)
 	}
-	return &Conn{pool: pool}, nil
+	return &Conn{pool: pool, dsn: dsn(cfg)}, nil
 }
 
-// Conn memegang pool pgx ke satu database target.
 type Conn struct {
 	pool *pgxpool.Pool
+	dsn  string
 }
 
 func (c *Conn) Ping(ctx context.Context) error { return c.pool.Ping(ctx) }
@@ -61,11 +61,13 @@ func (c *Conn) Close() error {
 func (c *Conn) Inspector() dbms.Inspector { return &Inspector{pool: c.pool} }
 func (c *Conn) Browser() dbms.DataBrowser { return &Browser{pool: c.pool} }
 
-// TODO(rhino): ganti dengan Migrator asli saat migrator.go masuk.
-func (c *Conn) Migrator() dbms.Migrator { return dbms.UnimplementedMigrator(true) }
+func (c *Conn) Migrator() dbms.Migrator {
+	return Migrator{Connector: DSNConnector{DSN: c.dsn}}
+}
 
-// TODO(rhino): ganti dengan Explainer asli saat explain.go masuk.
-func (c *Conn) Explainer() dbms.Explainer { return dbms.UnimplementedExplainer() }
+func (c *Conn) Explainer() dbms.Explainer {
+	return Explainer{Connector: DSNConnector{DSN: c.dsn}}
+}
 
 func dsn(cfg dbms.ConnConfig) string {
 	port := cfg.Port
@@ -88,9 +90,6 @@ func dsn(cfg dbms.ConnConfig) string {
 	return u.String()
 }
 
-// sanitize membuang DSN/password dari pesan error driver. Error asli tidak
-// dibungkus supaya rantai error yang membawa DSN tidak bisa diakses oleh
-// siapa pun (log, response, audit).
 func sanitize(cfg dbms.ConnConfig, err error) error {
 	msg := err.Error()
 	for _, secret := range []string{cfg.Password, url.QueryEscape(cfg.Password), url.PathEscape(cfg.Password)} {

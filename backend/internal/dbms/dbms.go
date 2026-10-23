@@ -1,6 +1,3 @@
-// Package dbms adalah kontrak antara domain explorer/migration dan driver
-// DBMS target (PostgreSQL, MySQL). Interface di sini dibekukan di Fase 0:
-// Inspector/Browser milik Edo, Migrator/Explainer milik Rhino.
 package dbms
 
 import (
@@ -18,11 +15,8 @@ const (
 )
 
 var (
-	// ErrNotFound dipakai bila objek yang diminta tidak ada di DBMS target
-	// (tabel/schema tidak ditemukan) — dipetakan explorer ke HTTP 404.
 	ErrNotFound = errors.New("objek tidak ditemukan di database target")
-	// ErrNotImplemented dipakai oleh stub Migrator/Explainer sebelum
-	// implementasi pemiliknya (Rhino) masuk.
+
 	ErrNotImplemented = errors.New("belum diimplementasi")
 )
 
@@ -54,8 +48,7 @@ type Inspector interface {
 	ListSchemas(ctx context.Context) ([]string, error)
 	ListTables(ctx context.Context, schema string) ([]schema.TableSummary, error)
 	DescribeTable(ctx context.Context, schemaName, table string) (*schema.Table, error)
-	// Snapshot mengambil seluruh schema; dipakai schema diff dan disimpan
-	// setelah migration sukses.
+
 	Snapshot(ctx context.Context) (*schema.Model, error)
 }
 
@@ -64,7 +57,6 @@ type DataBrowser interface {
 }
 
 type Migrator interface {
-	// SupportsTransactionalDDL: PostgreSQL true, MySQL false (DDL implicit commit).
 	SupportsTransactionalDDL() bool
 	Apply(ctx context.Context, in ApplyInput) (*ApplyResult, error)
 }
@@ -73,18 +65,15 @@ type Explainer interface {
 	Explain(ctx context.Context, in ExplainInput) (*ExplainResult, error)
 }
 
-// RowsQuery bersifat read-only. OrderBy hanya boleh berisi nama kolom yang
-// ada di tabel; driver wajib memvalidasinya terhadap hasil introspeksi.
 type RowsQuery struct {
 	Schema   string
 	Table    string
 	Limit    int
 	Offset   int
 	OrderBy  string
-	OrderDir string // "asc" (default) | "desc"
+	OrderDir string
 }
 
-// MaxRows adalah batas limit yang dipakai explorer.
 const MaxRows = 200
 
 type RowsPage struct {
@@ -95,23 +84,26 @@ type RowsPage struct {
 	Offset        int      `json:"offset"`
 }
 
-// Cell adalah nilai sel yang aman dikirim ke JSON (sudah dipotong/di-encode).
 type Cell struct {
 	Value     string `json:"value"`
 	IsNull    bool   `json:"isNull"`
 	Truncated bool   `json:"truncated,omitempty"`
 }
 
-// ApplyInput milik Rhino; field bisa bertambah sesuai kebutuhan engine.
 type ApplyInput struct {
-	Statements       []string
+	SQL              string
+	DatabaseID       int64
+	MigrationID      int64
 	RunID            int64
 	Version          int
+	Checksum         []byte
 	LockTimeout      time.Duration
 	StatementTimeout time.Duration
 }
 
 type ApplyResult struct {
+	StatementsExecuted   int
+	AppliedAt            time.Time
 	FailedStatementIndex int
 	ErrorCode            string
 	ErrorMessage         string
@@ -119,25 +111,23 @@ type ApplyResult struct {
 }
 
 type ExplainInput struct {
-	Statements []string
-	Analyze    bool
-	Timeout    time.Duration
+	SQL              string
+	Analyze          bool
+	StatementTimeout time.Duration
 }
 
 type ExplainResult struct {
-	Plans []StatementPlan
+	Statements []ExplainStatement
 }
 
-// StatementPlan milik Rhino: JSON plan apa adanya dari DBMS.
-type StatementPlan struct {
+type ExplainStatement struct {
 	Index       int
+	SQL         string
 	Explainable bool
-	JSON        string
-	Error       string
+	Notice      string
+	Plan        any
 }
 
-// UnimplementedMigrator/UnimplementedExplainer dipakai driver sampai
-// implementasi milik Rhino masuk, agar pemanggilan tidak panik.
 func UnimplementedMigrator(TransactionalDDL bool) Migrator {
 	return unimplementedMigrator{transactionalDDL: TransactionalDDL}
 }
@@ -158,8 +148,6 @@ func (unimplementedExplainer) Explain(context.Context, ExplainInput) (*ExplainRe
 	return nil, ErrNotImplemented
 }
 
-// Driver didaftarkan oleh package driver masing-masing (init), sehingga
-// menambah DBMS baru cukup menambah satu package dan mengimpornya di wiring.
 var (
 	driverMu     sync.RWMutex
 	driverByKind = map[string]Driver{}

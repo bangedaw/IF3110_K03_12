@@ -1,7 +1,3 @@
-// Package mysql mengimplementasikan dbms.Conn untuk target MySQL 8+:
-// introspeksi lewat information_schema, backtick identifier, dan transaksi
-// READ ONLY untuk browser. DDL MySQL implicit commit, jadi
-// SupportsTransactionalDDL() = false.
 package mysql
 
 import (
@@ -49,10 +45,9 @@ func (Driver) Open(ctx context.Context, cfg dbms.ConnConfig) (dbms.Conn, error) 
 	return &Conn{db: db, database: cfg.Database}, nil
 }
 
-// Conn memegang pool database/sql (driver go-sql-driver) ke satu target.
 type Conn struct {
 	db *sql.DB
-	// database: tujuan koneksi; satu-satunya "schema" yang terlihat.
+
 	database string
 }
 
@@ -63,12 +58,9 @@ func (c *Conn) Close() error { return c.db.Close() }
 func (c *Conn) Inspector() dbms.Inspector { return &Inspector{db: c.db, database: c.database} }
 func (c *Conn) Browser() dbms.DataBrowser { return &Browser{db: c.db, database: c.database} }
 
-// TODO(rhino): ganti dengan Migrator asli saat migrator.go masuk.
-// MySQL: DDL implicit commit, tidak transaksional.
-func (c *Conn) Migrator() dbms.Migrator { return dbms.UnimplementedMigrator(false) }
+func (c *Conn) Migrator() dbms.Migrator { return Migrator{DB: c.db} }
 
-// TODO(rhino): ganti dengan Explainer asli saat explain.go masuk.
-func (c *Conn) Explainer() dbms.Explainer { return dbms.UnimplementedExplainer() }
+func (c *Conn) Explainer() dbms.Explainer { return Explainer{DB: c.db} }
 
 func configFor(cfg dbms.ConnConfig) *mysql.Config {
 	port := cfg.Port
@@ -85,17 +77,13 @@ func configFor(cfg dbms.ConnConfig) *mysql.Config {
 	mc.ReadTimeout = 30 * time.Second
 	mc.WriteTimeout = 30 * time.Second
 	mc.ParseTime = true
-	// SSLMode: "disable" = tanpa TLS (default go-sql-driver); nilai lain
-	// diteruskan apa adanya sebagai mode tls go-sql-driver.
+
 	if cfg.SSLMode != "" && cfg.SSLMode != "disable" {
 		mc.TLSConfig = cfg.SSLMode
 	}
 	return mc
 }
 
-// sanitize membuang DSN/password dari pesan error driver. Error asli tidak
-// dibungkus supaya rantai error yang membawa DSN tidak bisa diakses oleh
-// siapa pun (log, response, audit).
 func sanitize(cfg dbms.ConnConfig, err error) error {
 	msg := err.Error()
 	for _, secret := range []string{cfg.Password, url.QueryEscape(cfg.Password), url.PathEscape(cfg.Password)} {
