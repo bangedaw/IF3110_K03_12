@@ -221,3 +221,26 @@ func (q *Queries) TouchSessionFamily(ctx context.Context, arg TouchSessionFamily
 	_, err := q.db.Exec(ctx, touchSessionFamily, arg.Now, arg.ID)
 	return err
 }
+
+const upsertPlatformAdmin = `-- name: UpsertPlatformAdmin :one
+INSERT INTO users (username, password_hash, is_platform_admin, is_active)
+VALUES ($1, $2, TRUE, TRUE)
+ON CONFLICT (username) DO UPDATE
+    SET password_hash     = EXCLUDED.password_hash,
+        is_platform_admin = TRUE,
+        is_active         = TRUE,
+        updated_at        = now()
+RETURNING id
+`
+
+type UpsertPlatformAdminParams struct {
+	Username     string
+	PasswordHash string
+}
+
+func (q *Queries) UpsertPlatformAdmin(ctx context.Context, arg UpsertPlatformAdminParams) (int64, error) {
+	row := q.db.QueryRow(ctx, upsertPlatformAdmin, arg.Username, arg.PasswordHash)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}

@@ -49,3 +49,13 @@ UPDATE session_families SET revoked_at = @now WHERE id = @id AND revoked_at IS N
 
 -- name: RevokeUserSessions :exec
 UPDATE session_families SET revoked_at = @now WHERE user_id = @user_id AND revoked_at IS NULL;
+
+-- name: UpsertPlatformAdmin :one
+INSERT INTO users (username, password_hash, is_platform_admin, is_active)
+VALUES (@username, @password_hash, TRUE, TRUE)
+ON CONFLICT (username) DO UPDATE
+    SET password_hash     = EXCLUDED.password_hash,
+        is_platform_admin = TRUE,
+        is_active         = TRUE,
+        updated_at        = now()
+RETURNING id;

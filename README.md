@@ -16,6 +16,15 @@ make run            # menjalankan migration platform DB lalu listen di :8080
 curl localhost:8080/api/healthz
 ```
 
+## Membuat Platform Admin pertama
+
+```bash
+cd backend && go run ./cmd/dbmpctl create-admin -username admin
+```
+
+Password diminta tanpa ditampilkan (atau dibaca dari stdin bila di-pipe). Menjalankan ulang untuk
+username yang sama akan mereset password, mengaktifkan kembali akun, dan me-revoke semua session-nya.
+
 ## Generate kode
 
 Setelah mengubah `api/openapi.yaml` atau `backend/internal/platformdb/queries/*.sql`:
