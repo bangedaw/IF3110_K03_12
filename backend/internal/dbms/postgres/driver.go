@@ -17,6 +17,7 @@ import (
 const (
 	defaultPort     = 5432
 	poolMaxConns    = 5
+	poolIdleTime    = 5 * time.Minute
 	connectTimeout  = 5 * time.Second
 	applicationName = "dbmp"
 )
@@ -34,6 +35,7 @@ func (Driver) Open(ctx context.Context, cfg dbms.ConnConfig) (dbms.Conn, error) 
 	poolCfg.ConnConfig.ConnectTimeout = connectTimeout
 	poolCfg.MaxConns = poolMaxConns
 	poolCfg.MinConns = 0
+	poolCfg.MaxConnIdleTime = poolIdleTime
 
 	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
