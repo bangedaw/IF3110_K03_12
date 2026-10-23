@@ -99,7 +99,6 @@ func Diff(a, b *schema.Model) []Change {
 				continue
 			}
 			if old.Kind != cur.Kind {
-
 				out = append(out, Change{
 					Kind: KindDropTable, Schema: sname, Table: old.Name, Name: old.Name,
 					Destructive: true, TableDef: &old,
@@ -155,7 +154,6 @@ func diffTable(sname string, old, cur schema.Table) []Change {
 			continue
 		}
 		if prev.DataType != cur.DataType || prev.Default != cur.Default || prev.Nullable != cur.Nullable {
-
 			destructive := (prev.Nullable && !cur.Nullable) || cur.IsGenerated || cur.IsIdentity
 			out = append(out, Change{
 				Kind: KindAlterColumn, Schema: sname, Table: old.Name, Name: name,
@@ -193,7 +191,6 @@ func diffConstraints(sname, table string, old, cur []schema.Constraint) []Change
 			continue
 		}
 		if !constraintEqual(prev, c) {
-
 			out = append(out, Change{
 				Kind: KindDropConstraint, Schema: sname, Table: table, Name: name,
 				Constraint: &prev,

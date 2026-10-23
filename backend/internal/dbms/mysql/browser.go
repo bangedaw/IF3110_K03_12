@@ -31,7 +31,6 @@ type Browser struct {
 var _ dbms.DataBrowser = (*Browser)(nil)
 
 func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, error) {
-
 	if q.Schema != b.database || excludedSchema(q.Schema) {
 		return nil, dbms.ErrNotFound
 	}
@@ -66,11 +65,10 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 		return nil, err
 	}
 	if len(cols) == 0 {
-
 		return nil, dbms.ErrNotFound
 	}
 	if q.OrderBy != "" && !slices.Contains(cols, q.OrderBy) {
-		return nil, errors.New("kolom urut tidak valid")
+		return nil, fmt.Errorf("%w: kolom urut tidak valid", dbms.ErrInvalidQuery)
 	}
 
 	query := rowsSQL(q.Schema, q.Table, cols, q, limit, offset)
@@ -88,7 +86,6 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 		Offset:        offset,
 	}
 	for rows.Next() {
-
 		vals := make([][]byte, len(cols))
 		ptrs := make([]any, len(cols))
 		for i := range vals {
@@ -155,7 +152,6 @@ func rowsSQL(schemaName, table string, cols []string, q dbms.RowsQuery, limit, o
 	reg := backtickQualified(schemaName, table)
 	quoted := make([]string, len(cols))
 	for i, c := range cols {
-
 		quoted[i] = "CAST(" + backtick(c) + " AS CHAR)"
 	}
 	orderBy := reg + "." + backtick(cols[0])
@@ -187,7 +183,7 @@ func normalizePage(q dbms.RowsQuery) (limit, offset int, err error) {
 	switch strings.ToLower(q.OrderDir) {
 	case "", "asc", "desc":
 	default:
-		return 0, 0, errors.New("arah urut tidak valid")
+		return 0, 0, fmt.Errorf("%w: arah urut tidak valid", dbms.ErrInvalidQuery)
 	}
 	return limit, offset, nil
 }

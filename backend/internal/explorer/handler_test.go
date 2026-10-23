@@ -292,3 +292,14 @@ func TestDeadTargetReturns503(t *testing.T) {
 	require.Equal(t, "DB_UNREACHABLE", problemCode(t, body))
 	require.NotContains(t, body, "apa-saja", "password koneksi tidak boleh bocor")
 }
+
+func TestInvalidRowsQueryReturns422(t *testing.T) {
+	f := setup(t)
+	base := "/api/databases/" + strconv.FormatInt(f.liveID, 10) + "/schemas/app/tables/books/rows"
+
+	for _, q := range []string{"?orderBy=kolom_tidak_ada", "?orderBy=id%3BDROP%20TABLE%20books", "?orderDir=sideways"} {
+		code, body := get(t, f.srv, base+q, "42")
+		require.Equal(t, http.StatusUnprocessableEntity, code, "query %s body: %s", q, body)
+		require.Equal(t, "VALIDATION_FAILED", problemCode(t, body))
+	}
+}

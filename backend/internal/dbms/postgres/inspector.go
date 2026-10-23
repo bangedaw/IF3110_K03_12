@@ -36,7 +36,7 @@ func (in *Inspector) ListSchemas(ctx context.Context) ([]string, error) {
 	}
 	defer rows.Close()
 
-	var out []string
+	out := []string{}
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {

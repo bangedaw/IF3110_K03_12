@@ -179,7 +179,6 @@ func TestDescribeTableNotFound(t *testing.T) {
 }
 
 func TestDescribeTableIsIdentifierSafe(t *testing.T) {
-
 	_, err := inspectorFor(t).DescribeTable(context.Background(), `app"; DROP TABLE app.books; --`, "x")
 	require.Error(t, err)
 }

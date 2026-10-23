@@ -69,7 +69,6 @@ func TestGenerateGolden(t *testing.T) {
 			from:    model(authorsFrom),
 			to: model(authorsFrom, table("reviews",
 				[]schema.Column{
-
 					{Name: "id", DataType: "bigint", IsIdentity: true, Ordinal: 1},
 					column("book_id", "bigint", false, ""),
 					column("body", "text", false, "''"),
@@ -122,7 +121,6 @@ func TestGenerateGolden(t *testing.T) {
 				[]schema.Index{{Name: "books_author_idx", Definition: "CREATE INDEX books_author_idx ON app.books USING btree (author_id, title)", Columns: []string{"author_id", "title"}}})),
 		},
 		{
-
 			name:    "postgres_full_order",
 			dialect: schema.KindPostgres,
 			from: model(authorsFrom, booksFrom, table("attachments",
@@ -180,7 +178,6 @@ func TestGenerateGolden(t *testing.T) {
 					nil)),
 		},
 		{
-
 			name:    "mysql_full_order",
 			dialect: schema.KindMySQL,
 			from: model(
@@ -276,7 +273,6 @@ func TestGenerateGolden(t *testing.T) {
 }
 
 func TestGenerate_EmptyAndUnsupported(t *testing.T) {
-
 	res, err := schemadiff.Generate(schema.KindPostgres, nil)
 	require.NoError(t, err)
 	require.Empty(t, res.Statements)
