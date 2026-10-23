@@ -13,7 +13,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/testutil"
 )
 
-// targetConfig dari container testutil: host/port/user/password sesungguhnya.
 func targetConfig(t *testing.T) dbms.ConnConfig {
 	t.Helper()
 	tc := testutil.MySQLTargetConfig(t)

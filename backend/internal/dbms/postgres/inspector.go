@@ -1,6 +1,3 @@
-// Inspector membaca pg_catalog pada database target, bersifat read-only.
-// Semua nama objek dari pengguna dilewatkan lewat parameter ($1) atau
-// pgx.Identifier.Sanitize sehingga tidak bisa menyuntik SQL.
 package postgres
 
 import (
@@ -22,7 +19,6 @@ type Inspector struct {
 
 var _ dbms.Inspector = (*Inspector)(nil)
 
-// excludedSchema: schema sistem tidak pernah ditampilkan ke pengguna.
 func excludedSchema(name string) bool {
 	return name == "information_schema" || strings.HasPrefix(name, "pg_")
 }
@@ -69,7 +65,6 @@ func (in *Inspector) ListTables(ctx context.Context, schemaName string) ([]schem
 	}
 	defer rows.Close()
 
-	// Slice diinisialisasi agar JSON selalu array (bukan null).
 	out := []schema.TableSummary{}
 	for rows.Next() {
 		var ts schema.TableSummary
@@ -154,8 +149,6 @@ LEFT JOIN pg_attrdef d ON d.adrelid = a.attrelid AND d.adnum = a.attnum
 WHERE a.attrelid = to_regclass($1) AND a.attnum > 0 AND NOT a.attisdropped
 ORDER BY a.attnum`
 
-// columns mengembalikan kolom terurut + pemetaan attnum->nama (dipakai
-// constraints/indexes yang merujuk kolom lewat attnum).
 func (in *Inspector) columns(ctx context.Context, reg string) ([]schema.Column, map[int16]string, error) {
 	rows, err := in.pool.Query(ctx, columnsSQL, reg)
 	if err != nil {
@@ -163,7 +156,6 @@ func (in *Inspector) columns(ctx context.Context, reg string) ([]schema.Column, 
 	}
 	defer rows.Close()
 
-	// Slice diinisialisasi agar JSON selalu berupa array, bukan null.
 	cols := []schema.Column{}
 	attrs := map[int16]string{}
 	for rows.Next() {
@@ -284,8 +276,6 @@ func (in *Inspector) indexes(ctx context.Context, reg string, attrs map[int16]st
 	return out, rows.Err()
 }
 
-// Snapshot mengambil seluruh schema non-sistem; dipakai schema diff dan
-// disimpan setelah migration sukses.
 func (in *Inspector) Snapshot(ctx context.Context) (*schema.Model, error) {
 	schemas, err := in.ListSchemas(ctx)
 	if err != nil {
@@ -351,9 +341,6 @@ func columnNames(attnums []int16, attrs map[int16]string) []string {
 	return out
 }
 
-// indexColumns memparsing indkey (int2vector sebagai teks "1 2 0");
-// angka <= 0 berarti kolom ekspresisi — sengaja dilewati, teks ekspresi
-// tetap tersedia di Definition.
 func indexColumns(indkey string, attrs map[int16]string) []string {
 	var out []string
 	for _, f := range strings.Fields(indkey) {
@@ -368,8 +355,6 @@ func indexColumns(indkey string, attrs map[int16]string) []string {
 	return out
 }
 
-// nonNegative: reltuples -1 = belum pernah di-VACUUM/ANALYZE (PG14+),
-// tampilkan 0 sebagai "belum diketahui" alih-alih angka negatif.
 func nonNegative(v int64) int64 {
 	if v < 0 {
 		return 0

@@ -1,9 +1,3 @@
-// Package schemadiff membandingkan dua model schema dan mengeluarkan daftar
-// perubahan untuk preview migrasi.
-//
-// Diff murni: tidak menyentuh database, tidak menjalankan SQL. Bila butuh
-// deteksi perubahan yang lebih tajam (mis. ekspresi default yang rumit), itu
-// urutan Task 13 lewat Migrator — bukan sini.
 package schemadiff
 
 import (
@@ -12,7 +6,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
-// Jenis perubahan, sesuai urutan spesifikasi §8.10.
 const (
 	KindDropTable      = "drop_table"
 	KindDropColumn     = "drop_column"
@@ -25,8 +18,6 @@ const (
 	KindAddTable       = "add_table"
 )
 
-// kindRank menentukan urutan global hasil diff: semua drop dulu, lalu alter,
-// lalu add — persis urutan di spesifikasi.
 var kindRank = map[string]int{
 	KindDropTable:      0,
 	KindDropColumn:     1,
@@ -36,13 +27,10 @@ var kindRank = map[string]int{
 	KindAddConstraint:  5,
 	KindDropIndex:      6,
 	KindAddIndex:       7,
-	// add_table tidak disebut urutannya di spesifikasi; taruh paling akhir
-	// karena pembuatan tabel adalah perubahan terbesar.
+
 	KindAddTable: 8,
 }
 
-// Change adalah satu perubahan skema. Field yang tidak relevan dengan kind
-// di-skip supaya respons API tidak bising.
 type Change struct {
 	Kind        string `json:"kind"`
 	Schema      string `json:"schema"`
@@ -50,10 +38,8 @@ type Change struct {
 	Name        string `json:"name"`
 	Destructive bool   `json:"destructive"`
 
-	// add_table/drop_table
 	TableDef *schema.Table `json:"tableDef,omitempty"`
 
-	// kolom: add/drop memakai satu sisi, alter memakai keduanya
 	Column   *schema.Column `json:"column,omitempty"`
 	Previous *schema.Column `json:"previous,omitempty"`
 
@@ -61,12 +47,6 @@ type Change struct {
 	Index      *schema.Index      `json:"index,omitempty"`
 }
 
-// AlignModels menyetarakan nama skema tunggal pada dua model. Kasus MySQL:
-// "schema" = nama database, sehingga diff antar dua database dengan nama
-// berbeda akan terlihat sebagai drop+add seluruh skema (tanpa arti). Bila
-// kedua model punya tepat satu skema dengan nama berbeda, skema b di-rename
-// menjadi nama skema a agar perbandingan terjadi per objek. Model multi-skema
-// (PostgreSQL: app + public) tidak disentuh.
 func AlignModels(a, b *schema.Model) {
 	if a == nil || b == nil || len(a.Schemas) != 1 || len(b.Schemas) != 1 {
 		return
@@ -80,8 +60,6 @@ func AlignModels(a, b *schema.Model) {
 	}
 }
 
-// Diff membandingkan baseline (a) dengan current (b). Keduanya boleh nil.
-// Hasil diurutkan deterministik: per jenis perubahan, lalu skema/tabel/nama.
 func Diff(a, b *schema.Model) []Change {
 	var out []Change
 
@@ -121,8 +99,7 @@ func Diff(a, b *schema.Model) []Change {
 				continue
 			}
 			if old.Kind != cur.Kind {
-				// Perubahan jenis tabel (mis. table -> partitioned) tidak bisa
-				// diubah tempat; perlakukan sebagai drop + add.
+
 				out = append(out, Change{
 					Kind: KindDropTable, Schema: sname, Table: old.Name, Name: old.Name,
 					Destructive: true, TableDef: &old,
@@ -152,7 +129,6 @@ func Diff(a, b *schema.Model) []Change {
 	return out
 }
 
-// diffTable membandingkan isi satu tabel yang namanya sama di kedua sisi.
 func diffTable(sname string, old, cur schema.Table) []Change {
 	var out []Change
 
@@ -179,8 +155,7 @@ func diffTable(sname string, old, cur schema.Table) []Change {
 			continue
 		}
 		if prev.DataType != cur.DataType || prev.Default != cur.Default || prev.Nullable != cur.Nullable {
-			// Kolom generated/identity tidak bisa diubah biasa; tetap dilaporkan
-			// sebagai alter destruktif supaya user tahu risikonya.
+
 			destructive := (prev.Nullable && !cur.Nullable) || cur.IsGenerated || cur.IsIdentity
 			out = append(out, Change{
 				Kind: KindAlterColumn, Schema: sname, Table: old.Name, Name: name,
@@ -218,7 +193,7 @@ func diffConstraints(sname, table string, old, cur []schema.Constraint) []Change
 			continue
 		}
 		if !constraintEqual(prev, c) {
-			// Nama sama tapi isi beda: buang lama, pasang baru.
+
 			out = append(out, Change{
 				Kind: KindDropConstraint, Schema: sname, Table: table, Name: name,
 				Constraint: &prev,
@@ -292,7 +267,6 @@ func slicesEqual(a, b []string) bool {
 	return true
 }
 
-// tablesBySchema mengindeks model per nama skema; model nil -> peta kosong.
 func tablesBySchema(m *schema.Model) map[string][]schema.Table {
 	out := map[string][]schema.Table{}
 	if m == nil {

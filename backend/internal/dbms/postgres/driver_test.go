@@ -13,7 +13,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/testutil"
 )
 
-// config dari container testutil: host/port/user/password yang sesungguhnya.
 func targetConfig(t *testing.T) dbms.ConnConfig {
 	t.Helper()
 	pool := testutil.NewPostgresTarget(t)

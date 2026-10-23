@@ -1,5 +1,3 @@
-// Package explorer menyajikan introspeksi database target kepada user
-// ber-grant: daftar database, schema, tabel, dan baris data (read-only).
 package explorer
 
 import (
@@ -21,12 +19,8 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schemadiff"
 )
 
-// listLimit: explorer memuat seluruh koneksi dalam satu halaman.
-// ponytail: 500 baris lebih dari cukup untuk Milestone 1; ganti ke
-// pagination bila jumlah koneksi mendekati itu.
 const listLimit = 500
 
-// Store adalah subset akses data dari dbconn.Store yang dipakai explorer.
 type Store interface {
 	ListConnections(ctx context.Context, limit, offset int32) ([]gen.DatabaseConnection, error)
 	GetConnectionByID(ctx context.Context, id int64) (gen.DatabaseConnection, error)
@@ -46,7 +40,6 @@ func NewService(store Store, registry *dbconn.Registry, az authz.Authorizer) *Se
 	return &Service{store: store, registry: registry, az: az}
 }
 
-// Database adalah ringkasan database target untuk daftar explorer.
 type Database struct {
 	ID       int64       `json:"id"`
 	Name     string      `json:"name"`
@@ -63,8 +56,6 @@ type DatabaseDetail struct {
 	SSLMode      string `json:"sslMode"`
 }
 
-// Snapshot adalah snapshot schema tersimpan (hasil Inspector.Snapshot saat
-// diambil); dipakai sebagai sumber pembanding pada schema diff.
 type Snapshot struct {
 	ID             int64         `json:"id"`
 	DatabaseID     int64         `json:"databaseId"`
@@ -74,7 +65,6 @@ type Snapshot struct {
 	Model          *schema.Model `json:"model"`
 }
 
-// Databases: hanya koneksi aktif yang EffectiveLevel user bukan none.
 func (s *Service) Databases(ctx context.Context, p authz.Principal) ([]Database, error) {
 	rows, err := s.store.ListConnections(ctx, listLimit, 0)
 	if err != nil {
@@ -104,7 +94,7 @@ func (s *Service) Databases(ctx context.Context, p authz.Principal) ([]Database,
 }
 
 func (s *Service) Database(ctx context.Context, p authz.Principal, id int64) (*DatabaseDetail, error) {
-	// Authorize dulu: keberadaan koneksi tidak dibocorkan ke user tanpa akses.
+
 	if err := s.az.Authorize(ctx, p, authz.ActionDBView, authz.Resource{DatabaseID: id}); err != nil {
 		return nil, err
 	}
@@ -134,7 +124,6 @@ func (s *Service) Database(ctx context.Context, p authz.Principal, id int64) (*D
 	}, nil
 }
 
-// target: authorize lalu ambil koneksi terbuka dari registry.
 func (s *Service) target(ctx context.Context, p authz.Principal, id int64) (dbms.Conn, error) {
 	if err := s.az.Authorize(ctx, p, authz.ActionDBView, authz.Resource{DatabaseID: id}); err != nil {
 		return nil, err
@@ -194,7 +183,6 @@ func (s *Service) Rows(ctx context.Context, p authz.Principal, id int64, q dbms.
 	return page, nil
 }
 
-// CreateSnapshot mengambil schema terkini dari target hidup lalu menyimpannya.
 func (s *Service) CreateSnapshot(ctx context.Context, p authz.Principal, databaseID int64) (*Snapshot, error) {
 	conn, err := s.target(ctx, p, databaseID)
 	if err != nil {
@@ -219,7 +207,6 @@ func (s *Service) CreateSnapshot(ctx context.Context, p authz.Principal, databas
 	return toSnapshot(row)
 }
 
-// Snapshots: daftar snapshot tersimpan; koneksi hidup tidak diperlukan.
 func (s *Service) Snapshots(ctx context.Context, p authz.Principal, databaseID int64) ([]Snapshot, error) {
 	if err := s.az.Authorize(ctx, p, authz.ActionDBView, authz.Resource{DatabaseID: databaseID}); err != nil {
 		return nil, err
@@ -239,8 +226,6 @@ func (s *Service) Snapshots(ctx context.Context, p authz.Principal, databaseID i
 	return out, nil
 }
 
-// Snapshot mengambil satu snapshot; terkunci pada databaseID agar snapshot
-// database lain tidak bisa dibaca lewat id (cross-database -> 404).
 func (s *Service) Snapshot(ctx context.Context, p authz.Principal, databaseID, snapshotID int64) (*Snapshot, error) {
 	if err := s.az.Authorize(ctx, p, authz.ActionDBView, authz.Resource{DatabaseID: databaseID}); err != nil {
 		return nil, err
@@ -252,28 +237,20 @@ func (s *Service) Snapshot(ctx context.Context, p authz.Principal, databaseID, s
 	return toSnapshot(row)
 }
 
-// SchemaDiffRequest adalah body POST .../schema-diff:
-// against = pembanding (koneksi hidup lain atau snapshot tersimpan),
-// direction = arah SQL yang dihasilkan (hanya "toTarget": buat {databaseId}
-// menyamai against).
 type SchemaDiffRequest struct {
 	Against struct {
-		Type string `json:"type"` // "database" | "snapshot"
+		Type string `json:"type"`
 		ID   int64  `json:"id"`
 	} `json:"against"`
 	Direction string `json:"direction"`
 }
 
-// SchemaDiffResult: perubahan skema, SQL gabungan, dan peringatan generator.
 type SchemaDiffResult struct {
 	Changes  []schemadiff.Change `json:"changes"`
 	SQL      string              `json:"sql"`
 	Warnings []string            `json:"warnings"`
 }
 
-// SchemaDiff membandingkan skema hidup {databaseId} dengan against lalu
-// menghasilkan SQL pengubah (arah toTarget). Butuh view di kedua sisi;
-// snapshot terkunci pada databaseId (cross-database -> 404).
 func (s *Service) SchemaDiff(ctx context.Context, p authz.Principal, databaseID int64, req SchemaDiffRequest) (*SchemaDiffResult, error) {
 	if fields := validateDiffRequest(req); len(fields) > 0 {
 		return nil, apperr.Validation(fields)
@@ -302,8 +279,6 @@ func (s *Service) SchemaDiff(ctx context.Context, p authz.Principal, databaseID 
 		return nil, err
 	}
 
-	// MySQL: "schema" = nama database, jadi diff dua koneksi dengan nama
-	// database berbeda disetarakan dulu agar dibandingkan per objek.
 	schemadiff.AlignModels(current, target)
 	changes := schemadiff.Diff(current, target)
 	if changes == nil {
@@ -342,7 +317,6 @@ func validateDiffRequest(req SchemaDiffRequest) map[string]string {
 	return fields
 }
 
-// liveModel: authorize view lalu ambil snapshot skema dari koneksi hidup.
 func (s *Service) liveModel(ctx context.Context, p authz.Principal, id int64) (*schema.Model, error) {
 	conn, err := s.target(ctx, p, id)
 	if err != nil {
@@ -377,13 +351,6 @@ func toSnapshot(row gen.SchemaSnapshot) (*Snapshot, error) {
 	return out, nil
 }
 
-// mapTargetErr memetakan kegagalan sisi database target:
-//   - objek tidak ada di target        -> 404
-//   - error ber-code apperr (mis.      -> kode aslinya (403/404/422)
-//   - sisanya (dial/timeout/driver)    -> 503 DB_UNREACHABLE
-//
-// ponytail: error validasi Browser (orderBy tak dikenal) juga kena 503;
-// bila UI perlu 422, tambahkan sentinel dbms.ErrInvalidQuery dan petakan di sini.
 func mapTargetErr(err error) error {
 	if err == nil {
 		return nil

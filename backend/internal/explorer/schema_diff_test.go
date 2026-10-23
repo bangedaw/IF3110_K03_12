@@ -12,7 +12,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/explorer"
 )
 
-// postJSON mengirim POST dengan body JSON.
 func postJSON(t *testing.T, srvURL, path, user string, body any) (int, string) {
 	t.Helper()
 	raw, err := json.Marshal(body)
@@ -36,7 +35,6 @@ func TestSchemaDiffAgainstSnapshot(t *testing.T) {
 	f := setup(t)
 	base := "/api/databases/" + strconv.FormatInt(f.liveID, 10)
 
-	// Snapshot dulu, lalu kolum baru ditambahkan ke target hidup.
 	code, body := post(t, f.srv, base+"/snapshots", "42")
 	require.Equal(t, http.StatusCreated, code, "body: %s", body)
 	var snap explorer.Snapshot
@@ -46,9 +44,6 @@ func TestSchemaDiffAgainstSnapshot(t *testing.T) {
 		`ALTER TABLE app.books ADD COLUMN subtitle text`)
 	require.NoError(t, err)
 
-	// Diff live terhadap snapshot: kolum subtitle harus terdeteksi sebagai
-	// add_column (arah: live -> snapshot berarti menambahkan; arah toTarget
-	// membuat live == target, jadi subtitle harus DIBUANG).
 	code, body = postJSON(t, f.srv.URL, base+"/schema-diff", "42", map[string]any{
 		"against":   map[string]any{"type": "snapshot", "id": snap.ID},
 		"direction": "toTarget",
@@ -67,7 +62,6 @@ func TestSchemaDiffAgainstSnapshot(t *testing.T) {
 	}
 	require.True(t, found, "changes: %+v", res.Changes)
 
-	// Tidak ada perubahan: live vs live -> perubahan kosong, SQL kosong.
 	code, body = postJSON(t, f.srv.URL, base+"/schema-diff", "42", map[string]any{
 		"against":   map[string]any{"type": "database", "id": f.liveID},
 		"direction": "toTarget",
@@ -86,25 +80,21 @@ func TestSchemaDiffAccessAndValidation(t *testing.T) {
 		"direction": "toTarget",
 	}
 
-	// Tanpa view di sisi awal: 403.
 	code, _ := postJSON(t, f.srv.URL, base+"/schema-diff", "43", ok)
 	require.Equal(t, http.StatusForbidden, code)
 
-	// View di sisi awal tapi tidak di sisi target: 403.
 	code, body := postJSON(t, f.srv.URL, base+"/schema-diff", "42", map[string]any{
 		"against":   map[string]any{"type": "database", "id": f.nograntID},
 		"direction": "toTarget",
 	})
 	require.Equal(t, http.StatusForbidden, code, "body: %s", body)
 
-	// Snapshot tidak ada / bukan milik database ini: 404.
 	code, body = postJSON(t, f.srv.URL, base+"/schema-diff", "42", map[string]any{
 		"against":   map[string]any{"type": "snapshot", "id": 999999},
 		"direction": "toTarget",
 	})
 	require.Equal(t, http.StatusNotFound, code, "body: %s", body)
 
-	// Direction tak dikenal: 422.
 	code, body = postJSON(t, f.srv.URL, base+"/schema-diff", "42", map[string]any{
 		"against":   map[string]any{"type": "database", "id": f.liveID},
 		"direction": "sideways",
@@ -112,14 +102,12 @@ func TestSchemaDiffAccessAndValidation(t *testing.T) {
 	require.Equal(t, http.StatusUnprocessableEntity, code, "body: %s", body)
 	require.Equal(t, "VALIDATION_FAILED", problemCode(t, body))
 
-	// Tipe against tak dikenal: 422.
 	code, _ = postJSON(t, f.srv.URL, base+"/schema-diff", "42", map[string]any{
 		"against":   map[string]any{"type": "table", "id": 1},
 		"direction": "toTarget",
 	})
 	require.Equal(t, http.StatusUnprocessableEntity, code)
 
-	// Field tak dikenal: 422 (decoder DisallowUnknownFields).
 	code, _ = postJSON(t, f.srv.URL, base+"/schema-diff", "42", map[string]any{
 		"against":   map[string]any{"type": "database", "id": f.liveID},
 		"direction": "toTarget",
@@ -127,11 +115,9 @@ func TestSchemaDiffAccessAndValidation(t *testing.T) {
 	})
 	require.Equal(t, http.StatusUnprocessableEntity, code)
 
-	// Tanpa sesi: 401.
 	code, _ = postJSON(t, f.srv.URL, base+"/schema-diff", "", ok)
 	require.Equal(t, http.StatusUnauthorized, code)
 
-	// Target mati: 503.
 	code, body = postJSON(t, f.srv.URL,
 		"/api/databases/"+strconv.FormatInt(f.deadID, 10)+"/schema-diff", "42", ok)
 	require.Equal(t, http.StatusServiceUnavailable, code, "body: %s", body)

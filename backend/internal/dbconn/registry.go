@@ -9,8 +9,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
 )
 
-// TargetCredentials adalah baris database_connections yang dibutuhkan
-// registry untuk membuka koneksi (tanpa kolom yang tidak relevan).
 type TargetCredentials struct {
 	ID                 int64
 	Name               string
@@ -24,14 +22,10 @@ type TargetCredentials struct {
 	IsActive           bool
 }
 
-// RegistryStore adalah akses data koneksi dari platform DB yang dibutuhkan
-// registry; diwujudkan oleh SQLStore dan dipalsukan di test.
 type RegistryStore interface {
 	GetConnection(ctx context.Context, id int64) (TargetCredentials, error)
 }
 
-// Registry membuka dan menyimpan koneksi (pool) ke database target per ID,
-// dengan invalidasi saat koneksi diubah/dihapus.
 type Registry struct {
 	Store   RegistryStore
 	Cipher  *secret.Cipher
@@ -56,8 +50,6 @@ func NewRegistry(store RegistryStore, cipher *secret.Cipher) *Registry {
 	}
 }
 
-// Get mengembalikan koneksi ke database target; dibuat lazily lalu di-cache.
-// Kegagalan tidak di-cache agar bisa dicoba ulang.
 func (r *Registry) Get(ctx context.Context, id int64) (dbms.Conn, error) {
 	r.mu.Lock()
 	if r.entries == nil {
@@ -78,8 +70,6 @@ func (r *Registry) Get(ctx context.Context, id int64) (dbms.Conn, error) {
 	return e.conn, nil
 }
 
-// Invalidate menutup dan melupakan koneksi sebuah database (dipanggil saat
-// konfigurasi koneksi diubah atau dihapus).
 func (r *Registry) Invalidate(id int64) {
 	r.mu.Lock()
 	e, ok := r.entries[id]
@@ -91,7 +81,6 @@ func (r *Registry) Invalidate(id int64) {
 	}
 }
 
-// Close menutup semua koneksi yang sedang di-cache.
 func (r *Registry) Close() {
 	r.mu.Lock()
 	entries := r.entries
@@ -121,7 +110,7 @@ func (r *Registry) open(ctx context.Context, id int64) (dbms.Conn, error) {
 	if err != nil {
 		return nil, apperr.Wrap(apperr.CodeValidation, "kredensial koneksi tidak bisa dibaca; periksa DBMP_SECRET_KEY", err)
 	}
-	// Password hanya hidup di memori untuk membuka pool; tidak pernah dicatat.
+
 	return driver.Open(ctx, dbms.ConnConfig{
 		Kind:     row.Kind,
 		Host:     row.Host,

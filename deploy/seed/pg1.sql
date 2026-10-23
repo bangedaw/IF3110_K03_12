@@ -1,6 +1,3 @@
--- target-pg-1: "inventory" versi PRODUCTION.
--- Sengaja dibuat berbeda dari pg2.sql supaya demo schema diff punya bahan.
-
 CREATE SCHEMA inventory;
 CREATE SCHEMA reporting;
 

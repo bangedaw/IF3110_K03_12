@@ -8,8 +8,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Timeout statement_timeout terjadi sebagai SQLSTATE 57014; dipetakan ke
-// pesan yang rapi agar explorer tidak menampilkan error mentah PG.
 func TestRowsErrorMapsStatementTimeout(t *testing.T) {
 	err := rowsError(&pgconn.PgError{
 		Code:    "57014",

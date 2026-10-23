@@ -14,7 +14,7 @@ func TestNormalizeType(t *testing.T) {
 		raw  string
 		want string
 	}{
-		// PostgreSQL: format_type sudah hampir kanonik, tinggal alias lama.
+
 		{schema.KindPostgres, "int4", "integer"},
 		{schema.KindPostgres, "int2", "smallint"},
 		{schema.KindPostgres, "int8", "bigint"},
@@ -29,7 +29,6 @@ func TestNormalizeType(t *testing.T) {
 		{schema.KindPostgres, "timestamp with time zone", "timestamp with time zone"},
 		{schema.KindPostgres, "numeric(10,2)", "numeric(10,2)"},
 
-		// MySQL information_schema memakai nama pendek.
 		{schema.KindMySQL, "int", "integer"},
 		{schema.KindMySQL, "INTEGER", "integer"},
 		{schema.KindMySQL, "tinyint(1)", "boolean"},

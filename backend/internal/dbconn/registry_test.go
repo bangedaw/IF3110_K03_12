@@ -163,7 +163,7 @@ func TestGetFailedOpenIsNotCached(t *testing.T) {
 	_, err := reg.Get(context.Background(), 7)
 	require.Error(t, err)
 
-	driver.err = nil // pulih; percobaan berikutnya harus mencoba lagi
+	driver.err = nil
 	_, err = reg.Get(context.Background(), 7)
 	require.NoError(t, err, "kegagalan open tidak boleh di-cache selamanya")
 }

@@ -1,9 +1,3 @@
-// Inspector membaca information_schema pada database target, bersifat
-// read-only. MySQL tidak punya "schema" terpisah: schema = nama database tujuan
-// koneksi (DATABASE()); satu koneksi hanya bisa melihat satu database — sama
-// seperti PostgreSQL, di mana satu koneksi terikat pada satu database. Nama
-// database/kolom/tabel dilewatkan lewat parameter sehingga tidak bisa menyuntik
-// SQL.
 package mysql
 
 import (
@@ -19,13 +13,12 @@ import (
 
 type Inspector struct {
 	db *sql.DB
-	// database: satu-satunya "schema" yang terlihat (target koneksi).
+
 	database string
 }
 
 var _ dbms.Inspector = (*Inspector)(nil)
 
-// excludedSchema: schema sistem tidak pernah ditampilkan ke pengguna.
 func excludedSchema(name string) bool {
 	switch name {
 	case "information_schema", "mysql", "performance_schema", "sys":
@@ -34,8 +27,6 @@ func excludedSchema(name string) bool {
 	return false
 }
 
-// visible: hanya database tujuan koneksi yang bisa ditelusuri; database
-// tetangga di server yang sama tersembunyi (paritas dengan PostgreSQL).
 func (in *Inspector) visible(schemaName string) bool {
 	return schemaName == in.database && !excludedSchema(schemaName)
 }
@@ -46,8 +37,7 @@ func (in *Inspector) ListSchemas(ctx context.Context) ([]string, error) {
 	if in.database == "" || excludedSchema(in.database) {
 		return nil, nil
 	}
-	// DATABASE() dipastikan non-kosong oleh Open (ping); tetap dicek agar
-	// koneksi tanpa database default tidak mengeluarkan nama kosong.
+
 	var name string
 	if err := in.db.QueryRowContext(ctx, listSchemasSQL).Scan(&name); err != nil || name == "" {
 		return nil, nil
@@ -55,8 +45,6 @@ func (in *Inspector) ListSchemas(ctx context.Context) ([]string, error) {
 	return []string{name}, nil
 }
 
-// TABLE_ROWS adalah estimasi InnoDB (bisa 0 bila belum pernah di-analyze);
-// tetap dipakai sebagai "totalEstimate" seperti reltuples di PostgreSQL.
 const listTablesSQL = `
 SELECT TABLE_NAME, COALESCE(TABLE_ROWS, 0)
 FROM information_schema.TABLES
@@ -73,7 +61,6 @@ func (in *Inspector) ListTables(ctx context.Context, schemaName string) ([]schem
 	}
 	defer rows.Close()
 
-	// Slice diinisialisasi agar JSON selalu array (bukan null).
 	out := []schema.TableSummary{}
 	for rows.Next() {
 		var ts schema.TableSummary
@@ -165,7 +152,6 @@ func (in *Inspector) columns(ctx context.Context, schemaName, table string) ([]s
 	}
 	defer rows.Close()
 
-	// Slice diinisialisasi agar JSON selalu berupa array, bukan null.
 	cols := []schema.Column{}
 	for rows.Next() {
 		var (
@@ -190,9 +176,6 @@ func (in *Inspector) columns(ctx context.Context, schemaName, table string) ([]s
 	return cols, rows.Err()
 }
 
-// constraints menggabungkan TABLE_CONSTRAINTS + KEY_COLUMN_USAGE (kolom, FK
-// rujukan) + REFERENTIAL_CONSTRAINTS (aksi) + CHECK_CONSTRAINTS (ekspresi).
-// Definisi direkonstruksi karena MySQL tidak menyimpan SQL mentah constraint.
 func (in *Inspector) constraints(ctx context.Context, schemaName, table string) ([]schema.Constraint, error) {
 	type pending struct {
 		schema.Constraint
@@ -201,7 +184,6 @@ func (in *Inspector) constraints(ctx context.Context, schemaName, table string) 
 	byName := map[string]*pending{}
 	var order []string
 
-	// 1) Daftar constraint + jenisnya.
 	rows, err := in.db.QueryContext(ctx, `
 SELECT CONSTRAINT_NAME, CONSTRAINT_TYPE
 FROM information_schema.TABLE_CONSTRAINTS
@@ -227,7 +209,6 @@ ORDER BY CONSTRAINT_NAME`, schemaName, table)
 		return nil, fmt.Errorf("baca constraint: %w", err)
 	}
 
-	// 2) Kolom (dan rujukan FK) per constraint, terurut ordinal.
 	krows, err := in.db.QueryContext(ctx, `
 SELECT CONSTRAINT_NAME, COLUMN_NAME, ORDINAL_POSITION,
        REFERENCED_TABLE_SCHEMA, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
@@ -261,7 +242,6 @@ ORDER BY CONSTRAINT_NAME, ORDINAL_POSITION`, schemaName, table)
 		return nil, fmt.Errorf("baca kolom constraint: %w", err)
 	}
 
-	// 3) Aksi ON DELETE/UPDATE FK.
 	frows, err := in.db.QueryContext(ctx, `
 SELECT CONSTRAINT_NAME, DELETE_RULE, UPDATE_RULE
 FROM information_schema.REFERENTIAL_CONSTRAINTS
@@ -284,7 +264,6 @@ WHERE CONSTRAINT_SCHEMA = ? AND TABLE_NAME = ?`, schemaName, table)
 		return nil, fmt.Errorf("baca constraint rujukan: %w", err)
 	}
 
-	// 4) Ekspresi CHECK.
 	crows, err := in.db.QueryContext(ctx, `
 SELECT tc.CONSTRAINT_NAME, cc.CHECK_CLAUSE
 FROM information_schema.TABLE_CONSTRAINTS tc
@@ -303,8 +282,7 @@ WHERE tc.TABLE_SCHEMA = ? AND tc.TABLE_NAME = ? AND tc.CONSTRAINT_TYPE = 'CHECK'
 			return nil, fmt.Errorf("baca constraint check: %w", err)
 		}
 		if p, ok := byName[name]; ok {
-			// Sama seperti pg_get_constraintdef: simpan_clause utuh
-			// ("CHECK (...)") supaya generator tinggal menempel.
+
 			p.Definition = "CHECK " + clause
 		}
 	}
@@ -323,8 +301,6 @@ WHERE tc.TABLE_SCHEMA = ? AND tc.TABLE_NAME = ? AND tc.CONSTRAINT_TYPE = 'CHECK'
 	return out, nil
 }
 
-// reconstructDefinition membangun teks definisi ringkas untuk PK/UNIQUE/FK
-// (CHECK sudah punya CHECK_CLAUSE). Cukup untuk tampilan dan diff.
 func reconstructDefinition(c schema.Constraint, hasRef bool) string {
 	cols := backtickList(c.Columns)
 	switch c.Type {
@@ -349,8 +325,6 @@ func reconstructDefinition(c schema.Constraint, hasRef bool) string {
 	return ""
 }
 
-// indexes: satu baris per kolom index di STATISTICS; PRIMARY = index unik
-// bawaan PK, dan kolom UNIQUE column juga muncul sebagai index unik.
 const indexesSQL = `
 SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME, INDEX_TYPE
 FROM information_schema.STATISTICS
@@ -399,8 +373,6 @@ func (in *Inspector) indexes(ctx context.Context, schemaName, table string) ([]s
 	return out, nil
 }
 
-// Snapshot mengambil seluruh schema non-sistem; dipakai schema diff dan
-// disimpan setelah migration sukses.
 func (in *Inspector) Snapshot(ctx context.Context) (*schema.Model, error) {
 	schemas, err := in.ListSchemas(ctx)
 	if err != nil {
@@ -478,8 +450,6 @@ func backtick(ident string) string {
 	return "`" + strings.ReplaceAll(ident, "`", "``") + "`"
 }
 
-// nonNegative: TABLE_ROWS bisa negatif pada galat statistik; tampilkan 0
-// sebagai "belum diketahui" alih-alih angka negatif.
 func nonNegative(v int64) int64 {
 	if v < 0 {
 		return 0

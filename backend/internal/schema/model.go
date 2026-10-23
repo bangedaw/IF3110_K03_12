@@ -1,6 +1,3 @@
-// Package schema menyediakan model kanonik schema database target.
-// Dipakai explorer (tampilan), snapshot, dan schema diff — karena itu tipe di
-// sini harus netral DBMS dan sudah dinormalisasi agar bisa dibandingkan.
 package schema
 
 import "sort"
@@ -22,7 +19,6 @@ const (
 	ConstraintCheck      = "check"
 )
 
-// Model adalah seluruh schema sebuah database, sudah dinormalisasi.
 type Model struct {
 	Schemas []Schema `json:"schemas"`
 }
@@ -32,7 +28,6 @@ type Schema struct {
 	Tables []Table `json:"tables"`
 }
 
-// TableSummary adalah ringkasan tabel untuk daftar (tanpa kolom/constraint).
 type TableSummary struct {
 	Schema      string `json:"schema"`
 	Name        string `json:"name"`
@@ -61,9 +56,6 @@ type Column struct {
 	Ordinal     int    `json:"ordinal"`
 }
 
-// Constraint menyimpan Definition apa adanya (hasil pg_get_constraintdef /
-// information_schema) karena merekonstruksi ulang SQL lintas dialek rawan
-// salah; kolom terurai diisi bila DBMS memberinya.
 type Constraint struct {
 	Name       string   `json:"name"`
 	Type       string   `json:"type"`
@@ -85,7 +77,6 @@ type Index struct {
 	Definition string   `json:"definition,omitempty"`
 }
 
-// Sort membuat urutan deterministik supaya diff dan golden test stabil.
 func (m *Model) Sort() {
 	if m == nil {
 		return

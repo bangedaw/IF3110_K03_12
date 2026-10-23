@@ -14,7 +14,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
-// Routes memasang endpoint explorer di bawah /api/databases.
 func Routes(r chi.Router, s *Service) {
 	r.Route("/databases", func(r chi.Router) {
 		r.Get("/", s.handleList)
@@ -144,7 +143,7 @@ func (s *Service) handleRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
-	// limit/offset salah format diabaikan (browser memberi default + clamp).
+
 	limit, _ := strconv.Atoi(query.Get("limit"))
 	offset, _ := strconv.Atoi(query.Get("offset"))
 	q := dbms.RowsQuery{

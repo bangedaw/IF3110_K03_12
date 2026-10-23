@@ -12,7 +12,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 )
 
-// Store adalah akses data koneksi di platform DB (satu implementasi sqlc).
 type Store interface {
 	ListConnections(ctx context.Context, limit, offset int32) ([]gen.DatabaseConnection, error)
 	CountConnections(ctx context.Context) (int64, error)
@@ -21,7 +20,6 @@ type Store interface {
 	UpdateConnection(ctx context.Context, arg gen.UpdateConnectionParams) (gen.DatabaseConnection, error)
 	DeleteConnection(ctx context.Context, id int64) error
 
-	// GetConnection dipakai Registry untuk membuka koneksi target.
 	GetConnection(ctx context.Context, id int64) (TargetCredentials, error)
 }
 
@@ -74,8 +72,6 @@ func (s *SQLStore) GetConnection(ctx context.Context, id int64) (TargetCredentia
 		IsActive:           row.IsActive,
 	}, nil
 }
-
-// --- snapshot schema (dipakai explorer; satu SQLStore untuk dua service) ---
 
 func (s *SQLStore) CreateSnapshot(ctx context.Context, arg gen.CreateSnapshotParams) (gen.SchemaSnapshot, error) {
 	row, err := s.Q.CreateSnapshot(ctx, arg)

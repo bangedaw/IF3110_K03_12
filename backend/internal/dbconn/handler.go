@@ -12,7 +12,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/httpx"
 )
 
-// Routes memasang endpoint koneksi di bawah /api/admin/databases.
 func Routes(r chi.Router, s *Service) {
 	r.Route("/admin/databases", func(r chi.Router) {
 		r.Get("/", s.handleList)
@@ -144,8 +143,6 @@ func (s *Service) handleDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// testRequest menerima dua bentuk: kredensial penuh (sebelum simpan) atau
-// { databaseId } untuk koneksi yang sudah tersimpan.
 type testRequest struct {
 	DatabaseID *int64 `json:"databaseId"`
 	Input

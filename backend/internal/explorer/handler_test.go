@@ -24,7 +24,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/testutil"
 
-	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres" // daftarkan driver
+	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres"
 )
 
 const cipherKey = "REVWLU9OTFktREVWLU9OTFktREVWLU9OTFktREVWLU8="
@@ -38,12 +38,6 @@ type fixture struct {
 	nograntID  int64
 }
 
-// setup menyiapkan platform DB dengan 3 koneksi:
-//   - live:    aktif, menunjuk target PG hidup (schema seed app.*)
-//   - inactive: dinonaktifkan (harus tersembunyi dari semua endpoint)
-//   - dead:    aktif tapi host mati (harus 503 DB_UNREACHABLE)
-//
-// user 42 diberi view pada ketiganya; user 43 tanpa akses apa pun.
 func setup(t *testing.T) fixture {
 	t.Helper()
 
@@ -77,9 +71,9 @@ func setup(t *testing.T) fixture {
 		target:     target,
 		liveID:     insert("live", cc.Host, int(cc.Port), true, cc.Password),
 		inactiveID: insert("inactive", cc.Host, int(cc.Port), false, cc.Password),
-		// Port 1 tidak menerima koneksi apa pun (koneksi ditolak segera).
+
 		deadID: insert("dead", "127.0.0.1", 1, true, "apa-saja"),
-		// Aktif tapi tidak digrant ke siapa pun (uji sisi target diff).
+
 		nograntID: insert("nogrant", cc.Host, int(cc.Port), true, cc.Password),
 	}
 
@@ -96,8 +90,7 @@ func setup(t *testing.T) fixture {
 	svc := explorer.NewService(store, reg, az)
 
 	r := httpx.NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	// Middleware uji: memasang principal seperti session middleware Miguel
-	// nanti (integrasi I-2).
+
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if u := req.Header.Get("X-Test-User"); u != "" {
@@ -118,7 +111,6 @@ func setup(t *testing.T) fixture {
 	return f
 }
 
-// get melakukan GET; user "" berarti tanpa sesi (harus 401).
 func get(t *testing.T, srv *httptest.Server, path, user string) (int, string) {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, srv.URL+path, nil)
@@ -167,12 +159,10 @@ func TestListDatabasesFiltersAccessAndActive(t *testing.T) {
 	require.NotContains(t, byID, f.inactiveID, "koneksi non-aktif tersembunyi")
 	require.Equal(t, authz.LevelView, byID[f.liveID].Level)
 
-	// Tanpa akses apa pun: daftar kosong (200, bukan 403).
 	code, body := get(t, f.srv, "/api/databases", "43")
 	require.Equal(t, http.StatusOK, code, "body: %s", body)
 	require.Equal(t, "[]", strings.TrimSpace(body))
 
-	// Tanpa sesi: 401.
 	code, _ = get(t, f.srv, "/api/databases", "")
 	require.Equal(t, http.StatusUnauthorized, code)
 }
@@ -187,19 +177,15 @@ func TestGetDatabaseAccess(t *testing.T) {
 	require.Equal(t, authz.LevelView, d.Level)
 	require.NotEmpty(t, d.Host)
 
-	// Tanpa akses -> 403.
 	code, _ := get(t, f.srv, "/api/databases/"+strconv.FormatInt(f.liveID, 10), "43")
 	require.Equal(t, http.StatusForbidden, code)
 
-	// Koneksi non-aktif -> 404 meski ber-grant.
 	code, _ = get(t, f.srv, "/api/databases/"+strconv.FormatInt(f.inactiveID, 10), "42")
 	require.Equal(t, http.StatusNotFound, code)
 
-	// Tidak ada & tidak ber-grant -> 403 (keberadaan tidak dibocorkan).
 	code, _ = get(t, f.srv, "/api/databases/999999", "42")
 	require.Equal(t, http.StatusForbidden, code)
 
-	// Tanpa sesi -> 401.
 	code, _ = get(t, f.srv, "/api/databases/"+strconv.FormatInt(f.liveID, 10), "")
 	require.Equal(t, http.StatusUnauthorized, code)
 }
@@ -237,7 +223,6 @@ func TestTablesList(t *testing.T) {
 	require.EqualValues(t, 12, byName["books"])
 	require.EqualValues(t, 3, byName["attachments"])
 
-	// Schema kosong -> [] 200.
 	code, body := get(t, f.srv, base+"/schemas/tidak_ada/tables", "42")
 	require.Equal(t, http.StatusOK, code)
 	require.Equal(t, "[]", strings.TrimSpace(body))

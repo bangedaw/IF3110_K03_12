@@ -8,14 +8,10 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
-// myGen menghasilkan DDL MySQL dari daftar perubahan. Perbedaan mendasar dari
-// PostgreSQL: identifier di-quote backtick, ALTER COLUMN = MODIFY (menyatakan
-// ulang seluruh definisi), constraint PK/UNIQUE/FK dibuang dengan sintaks
-// berbeda-beda, dan index tidak bisa di-IF EXISTS-kan.
 type myGen struct {
 	autoIndex      map[string]bool
-	dropConstraint map[string]bool // nama constraint yang dibuang (index-nya ikut hilang)
-	dropPK         map[string]bool // tabel yang PK-nya dibuang (index PRIMARY ikut hilang)
+	dropConstraint map[string]bool
+	dropPK         map[string]bool
 }
 
 func newMySQLGen(changes []Change) *myGen {
@@ -24,9 +20,7 @@ func newMySQLGen(changes []Change) *myGen {
 		dropConstraint: map[string]bool{},
 		dropPK:         map[string]bool{},
 	}
-	// Pre-scan: index milik constraint (PK/UNIQUE) tidak boleh dibuat ulang
-	// lewat CREATE INDEX, dan tidak boleh di-DROP dua kali setelah
-	// constraint-nya dibuang.
+
 	for _, c := range changes {
 		key := indexKey(c.Schema, c.Table, c.Name)
 		switch c.Kind {
@@ -82,7 +76,6 @@ func (g *myGen) statements(c Change) []stmt {
 	}
 }
 
-// dropConstraintStmt: MySQL tidak punya DROP CONSTRAINT umum.
 func (g *myGen) dropConstraintStmt(c Change) []stmt {
 	if c.Constraint == nil {
 		return nil
@@ -95,10 +88,10 @@ func (g *myGen) dropConstraintStmt(c Change) []stmt {
 		return []stmt{{phaseDropConstraint, fmt.Sprintf("ALTER TABLE %s DROP FOREIGN KEY %s",
 			tbl, myQuote(c.Name))}}
 	case schema.ConstraintUnique:
-		// UNIQUE = index unik; membuangnya = DROP INDEX.
+
 		return []stmt{{phaseDropConstraint, fmt.Sprintf("ALTER TABLE %s DROP INDEX %s",
 			tbl, myQuote(c.Name))}}
-	default: // check
+	default:
 		return []stmt{{phaseDropConstraint, fmt.Sprintf("ALTER TABLE %s DROP CHECK %s",
 			tbl, myQuote(c.Name))}}
 	}
@@ -109,7 +102,7 @@ func (g *myGen) addConstraint(c Change) []stmt {
 		return nil
 	}
 	tbl := myQualified(c.Schema, c.Table)
-	// PK: simbol nama diabaikan MySQL; cukup ADD PRIMARY KEY (kolom).
+
 	if c.Constraint.Type == schema.ConstraintPrimaryKey {
 		return []stmt{{phaseAddConstraint, fmt.Sprintf("ALTER TABLE %s ADD PRIMARY KEY (%s)",
 			tbl, myQuoteList(c.Constraint.Columns))}}
@@ -118,15 +111,11 @@ func (g *myGen) addConstraint(c Change) []stmt {
 	if c.Constraint.Type == schema.ConstraintForeignKey {
 		phase = phaseAddFK
 	}
-	// Definisi dari information_schema sudah persis bagian setelah
-	// "ADD CONSTRAINT <nama>" — tempel apa adanya.
+
 	return []stmt{{phase, fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s %s",
 		tbl, myQuote(c.Name), c.Constraint.Definition)}}
 }
 
-// dropIndex: MySQL tidak mengenal IF EXISTS untuk DROP INDEX; index yang
-// namanya sama dengan constraint yang baru dibuang sudah ikut hilang dan
-// dilewati oleh pre-scan.
 func (g *myGen) dropIndex(c Change) []stmt {
 	key := indexKey(c.Schema, c.Table, c.Name)
 	if g.dropConstraint[key] {
@@ -143,7 +132,7 @@ func (g *myGen) addIndex(c Change) []stmt {
 	if c.Index == nil {
 		return nil
 	}
-	// Index milik constraint PK/UNIQUE sudah dibuat oleh ADD CONSTRAINT.
+
 	if g.autoIndex[indexKey(c.Schema, c.Table, c.Name)] {
 		return nil
 	}
@@ -162,14 +151,12 @@ func (g *myGen) addTable(c Change) []stmt {
 	var defs []string
 	for _, col := range c.TableDef.Columns {
 		if col.IsGenerated {
-			// Ekspresi generated column tidak tersimpan di model; SQL yang
-			// ditebak akan salah, jadi dilewati dan dilaporkan lewat warning.
+
 			continue
 		}
 		defs = append(defs, "  "+myColumnDef(col))
 	}
-	// PK inline di CREATE TABLE: MySQL menolak AUTO_INCREMENT yang bukan key
-	// (Error 1075), dan ADD PRIMARY KEY baru dieksekusi setelah fase create.
+
 	for _, cs := range c.TableDef.Constraints {
 		if cs.Type == schema.ConstraintPrimaryKey {
 			defs = append(defs, "  PRIMARY KEY ("+myQuoteList(cs.Columns)+")")
@@ -180,7 +167,7 @@ func (g *myGen) addTable(c Change) []stmt {
 
 	for _, cs := range c.TableDef.Constraints {
 		if cs.Type == schema.ConstraintPrimaryKey {
-			continue // sudah inline di CREATE TABLE
+			continue
 		}
 		out = append(out, g.statements(Change{
 			Kind: KindAddConstraint, Schema: c.Schema, Table: c.Table,
@@ -196,8 +183,6 @@ func (g *myGen) addTable(c Change) []stmt {
 	return out
 }
 
-// alterColumn: MySQL hanya punya MODIFY COLUMN — satu pernyataan yang
-// menyatakan ulang seluruh definisi kolom (tipe, null, default, auto_increment).
 func (g *myGen) alterColumn(c Change) []stmt {
 	if c.Column == nil {
 		return nil
@@ -232,11 +217,6 @@ func (g *myGen) warnings(c Change) []string {
 	return nil
 }
 
-// myColumnDef merender definisi kolom MySQL. Urutan atribut mengikuti
-// tata bahasa MySQL: tipe, NULL/NOT NULL, DEFAULT, AUTO_INCREMENT.
-// RawType diprioritaskan (tipe mentah persis dari information_schema,
-// mis. varchar(120) atau enum('a','b')); DataType kanonik tidak valid sebagai
-// DDL MySQL (character varying tidak dikenal).
 func myColumnDef(c schema.Column) string {
 	typ := c.RawType
 	if typ == "" {
@@ -260,21 +240,16 @@ func myColumnDef(c schema.Column) string {
 	return b.String()
 }
 
-// myDefault merender nilai default dari COLUMN_DEFAULT MySQL (literal tak-
-// berversir untuk string, angka apa adanya). Heuristic yang disengaja:
-// literal numerik/fungsi/kelompok dieksekusi apa adanya, sisanya di-quote.
-// ponytail: cukup untuk tipe default MySQL umum; bila muncul tipe eksotis
-// (bit literal, expression default MySQL 8.0.13), tambahkan kasus di sini.
 func myDefault(v string) string {
 	up := strings.ToUpper(v)
 	if up == "NULL" || up == "CURRENT_TIMESTAMP" || strings.HasPrefix(up, "CURRENT_TIMESTAMP(") {
 		return v
 	}
 	if _, err := strconv.ParseFloat(v, 64); err == nil {
-		return v // literal numerik
+		return v
 	}
 	if strings.Contains(v, "(") {
-		return v // pemanggilan fungsi / ekspresi berkelompok
+		return v
 	}
 	return "'" + strings.ReplaceAll(v, "'", "''") + "'"
 }

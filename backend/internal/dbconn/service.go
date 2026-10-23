@@ -11,8 +11,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
 )
 
-// testTimeout membatasi test connection supaya host yang tidak merespons
-// tidak menggantung request.
 const testTimeout = 5 * time.Second
 
 type Service struct {
@@ -26,7 +24,6 @@ func NewService(store Store, registry *Registry, cipher *secret.Cipher, az authz
 	return &Service{store: store, registry: registry, cipher: cipher, authorizer: az}
 }
 
-// Connection adalah representasi API; password tidak pernah ikut.
 type Connection struct {
 	ID           int64     `json:"id"`
 	Name         string    `json:"name"`
@@ -211,7 +208,7 @@ func (s *Service) Update(ctx context.Context, p authz.Principal, id int64, in Pa
 		return nil, err
 	}
 	if updatePassword {
-		// Pool lama memakai password lama; buka ulang pada akses berikutnya.
+
 		s.registry.Invalidate(id)
 	}
 	out := toAPI(row)
@@ -229,7 +226,6 @@ func (s *Service) Delete(ctx context.Context, p authz.Principal, id int64) error
 	return s.store.DeleteConnection(ctx, id)
 }
 
-// Test memutus koneksi ke database target; tidak menyimpan apa pun.
 func (s *Service) Test(ctx context.Context, p authz.Principal, in Input, databaseID *int64) (*TestResult, error) {
 	if err := s.authorize(ctx, p); err != nil {
 		return nil, err

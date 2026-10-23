@@ -13,8 +13,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
-// inspectorFor membuka koneksi ke target PG segar (seed diketahui test:
-// schema `app` berisi authors/books/attachments + view book_authors).
 func inspectorFor(t *testing.T) dbms.Inspector {
 	t.Helper()
 	cfg := targetConfig(t)
@@ -60,7 +58,6 @@ func TestListTablesKnownSchema(t *testing.T) {
 	require.EqualValues(t, 12, byName["books"].RowEstimate)
 	require.EqualValues(t, 3, byName["attachments"].RowEstimate)
 
-	// Urutan deterministik untuk tampilan.
 	require.Equal(t, "attachments", got[0].Name)
 	require.Equal(t, "authors", got[1].Name)
 	require.Equal(t, "books", got[2].Name)
@@ -113,7 +110,6 @@ func TestDescribeTableColumns(t *testing.T) {
 	require.Equal(t, "text[]", tags.DataType)
 	require.False(t, tags.Nullable)
 
-	// Ordinal sesuai urutan definisi kolom.
 	require.Equal(t, 1, byName["id"].Ordinal)
 	require.Equal(t, 6, byName["tags"].Ordinal)
 }
@@ -183,7 +179,7 @@ func TestDescribeTableNotFound(t *testing.T) {
 }
 
 func TestDescribeTableIsIdentifierSafe(t *testing.T) {
-	// Nama berbahaya ditolak sebagai tidak ditemukan, bukan dieksekusi.
+
 	_, err := inspectorFor(t).DescribeTable(context.Background(), `app"; DROP TABLE app.books; --`, "x")
 	require.Error(t, err)
 }
@@ -199,7 +195,7 @@ func TestSnapshotWholeDatabase(t *testing.T) {
 	m, err := inspectorFor(t).Snapshot(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, m)
-	m.Sort() // idempoten: hasil sudah sorted
+	m.Sort()
 
 	require.NotEmpty(t, m.Schemas)
 	require.Equal(t, "app", m.Schemas[0].Name, "schemas terurut abjad")

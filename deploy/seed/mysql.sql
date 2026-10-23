@@ -1,5 +1,3 @@
--- target-mysql: database "sales" (bonus MySQL viewer/migrator).
-
 SET SESSION cte_max_recursion_depth = 10001;
 
 CREATE TABLE customers (

@@ -57,7 +57,6 @@ func TestRowsPagination(t *testing.T) {
 	require.Empty(t, beyond.Rows)
 	require.EqualValues(t, 12, beyond.TotalEstimate)
 
-	// Limit 0 = default; limit > MaxRows di-clamp.
 	all := booksRows(t, dbms.RowsQuery{Table: "books"})
 	require.Len(t, all.Rows, 12)
 	require.Equal(t, 50, all.Limit)
@@ -77,21 +76,17 @@ func TestRowsOrderBy(t *testing.T) {
 func TestRowsRejectsInjection(t *testing.T) {
 	b := browserFor(t)
 
-	// Nama tabel: ditolak sebagai tidak ditemukan, bukan dieksekusi.
 	_, err := b.Rows(context.Background(), dbms.RowsQuery{Schema: "app", Table: `books"; DROP TABLE app.books; --`})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, dbms.ErrNotFound))
 
-	// Kolom urut di luar whitelist: ditolak.
 	_, err = b.Rows(context.Background(), dbms.RowsQuery{Schema: "app", Table: "books", OrderBy: `title); DROP TABLE app.books; --`})
 	require.Error(t, err)
 	require.False(t, errors.Is(err, dbms.ErrNotFound), "orderBy bukan soal tidak ada, tapi ditolak")
 
-	// Arah urut hanya asc/desc.
 	_, err = b.Rows(context.Background(), dbms.RowsQuery{Schema: "app", Table: "books", OrderBy: "title", OrderDir: `asc; DROP TABLE app.books`})
 	require.Error(t, err)
 
-	// Buktikan tabel masih utuh setelah percobaan di atas.
 	page := booksRows(t, dbms.RowsQuery{Table: "books", Limit: 1})
 	require.Len(t, page.Rows, 1)
 }
@@ -103,7 +98,6 @@ func TestRowsNotFound(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, errors.Is(err, dbms.ErrNotFound))
 
-	// Schema sistem tidak bisa ditelusuri.
 	_, err = b.Rows(context.Background(), dbms.RowsQuery{Schema: "pg_catalog", Table: "pg_class"})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, dbms.ErrNotFound))
@@ -116,7 +110,7 @@ func TestRowsSerializesCellsSafely(t *testing.T) {
 	atts := booksRows(t, dbms.RowsQuery{Table: "attachments"})
 	require.Len(t, atts.Rows, 3)
 
-	deadbeef := atts.Rows[0][2] // data bytea
+	deadbeef := atts.Rows[0][2]
 	require.False(t, deadbeef.IsNull)
 	require.Equal(t, `\xdeadbeef`, deadbeef.Value, "bytea ditampilkan sebagai hex")
 
@@ -124,7 +118,7 @@ func TestRowsSerializesCellsSafely(t *testing.T) {
 	require.True(t, nullData.IsNull)
 	require.False(t, nullData.Truncated)
 
-	longNote := atts.Rows[2][3] // note: teks panjang
+	longNote := atts.Rows[2][3]
 	require.True(t, longNote.Truncated, "teks panjang dipotong")
 	require.LessOrEqual(t, len(longNote.Value), 256)
 	require.False(t, atts.Rows[0][3].Truncated, "teks pendek tidak dipotong")

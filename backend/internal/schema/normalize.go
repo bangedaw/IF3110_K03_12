@@ -2,10 +2,6 @@ package schema
 
 import "strings"
 
-// Normalisasi membuat tipe/default dari DBMS berbeda bisa dibandingkan.
-// Batasan yang disengaja: perbandingan bersifat teks setelah normalisasi,
-// jadi ekspresi default yang rumit bisa menghasilkan false positive pada diff.
-
 var pgTypeAlias = map[string]string{
 	"int2": "smallint", "int4": "integer", "int8": "bigint", "int": "integer",
 	"bool": "boolean", "float4": "real", "float8": "double precision",
@@ -33,7 +29,6 @@ var mysqlIntWidth = map[string]bool{
 	"tinyint": true, "smallint": true, "mediumint": true, "int": true, "integer": true, "bigint": true,
 }
 
-// NormalizeType mengubah tipe mentah DBMS menjadi bentuk kanonik.
 func NormalizeType(kind, raw string) string {
 	name, args := splitType(collapseSpace(strings.ToLower(strings.TrimSpace(raw))))
 	if name == "" {
@@ -41,11 +36,11 @@ func NormalizeType(kind, raw string) string {
 	}
 	switch kind {
 	case KindMySQL:
-		// tinyint(1) adalah boolean de facto di MySQL.
+
 		if name == "tinyint" && args == "1" {
 			return "boolean"
 		}
-		// Display width pada tipe bilangan tidak mengubah arti; buang.
+
 		if mysqlIntWidth[name] {
 			args = ""
 		}
@@ -63,8 +58,6 @@ func NormalizeType(kind, raw string) string {
 	return name + "(" + args + ")"
 }
 
-// NormalizeDefault membandingkan default expression secara lebih setara:
-// membuang cast ::tipe khas PostgreSQL dan menyeragamkan CURRENT_TIMESTAMP.
 func NormalizeDefault(kind, raw string) string {
 	s := strings.TrimSpace(raw)
 	if s == "" {
@@ -88,13 +81,12 @@ func NormalizeDefault(kind, raw string) string {
 	return s
 }
 
-// stripPGCast membuang suffix `::tipe` di luar literal string.
 func stripPGCast(s string) string {
 	inQuote := false
 	for i := 0; i+1 < len(s); i++ {
 		switch s[i] {
 		case '\'':
-			// '' di dalam string adalah quote yang di-escape.
+
 			if inQuote && s[i+1] == '\'' {
 				i++
 				continue

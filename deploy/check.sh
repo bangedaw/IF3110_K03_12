@@ -1,6 +1,4 @@
 #!/usr/bin/env bash
-# Memastikan seed di ketiga database target sudah termuat. Dipakai `make seed`
-# dan sebagai pemeriksaan setelah `docker compose up`.
 set -euo pipefail
 
 PG1_URL=${PG1_URL:-'postgres://dbmp:dbmp@localhost:5433/inventory?sslmode=disable'}
@@ -12,7 +10,7 @@ MYSQL_PWD_VAL=${MYSQL_PASSWORD:-dbmp}
 
 fail=0
 
-check() { # check <label> <expected-min> <actual>
+check() {
   local label=$1 min=$2 actual=$3
   if [ "$actual" -ge "$min" ]; then
     printf 'ok   %-38s %s baris\n' "$label" "$actual"
@@ -36,7 +34,6 @@ check 'pg2 inventory.stock_movements' 3000 "$(pg_count "$PG2_URL" 'SELECT count(
 check 'mysql sales.orders' 5000 "$(my_count "$MYSQL_HOST" 'SELECT count(*) FROM orders')"
 check 'mysql sales.order_items' 10000 "$(my_count "$MYSQL_HOST" 'SELECT count(*) FROM order_items')"
 
-# pg1 dan pg2 harus berbeda supaya demo schema diff punya bahan.
 pg1_attrs=$(pg_count "$PG1_URL" "SELECT count(*) FROM information_schema.columns WHERE table_schema='inventory' AND table_name='products' AND column_name='attrs'")
 pg2_attrs=$(pg_count "$PG2_URL" "SELECT count(*) FROM information_schema.columns WHERE table_schema='inventory' AND table_name='products' AND column_name='attrs'")
 if [ "$pg1_attrs" = "1" ] && [ "$pg2_attrs" = "0" ]; then

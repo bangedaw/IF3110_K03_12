@@ -13,10 +13,9 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schemadiff"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/testutil"
 
-	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/mysql" // daftarkan driver
+	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/mysql"
 )
 
-// mysqlConfigOf membuat ConnConfig dari MySQLTarget testutil.
 func mysqlConfigOf(t *testing.T) dbms.ConnConfig {
 	t.Helper()
 	tc := testutil.MySQLTargetConfig(t)
@@ -53,10 +52,8 @@ func mysqlSnapshot(t *testing.T, cfg dbms.ConnConfig) *schema.Model {
 	return model
 }
 
-// mysqlMutations membuat skema B berbeda dari seed (customers/orders +
-// long_cells); semuanya harus bisa direproduksi oleh generator mysql.
 var mysqlMutations = []string{
-	// Tabel baru dengan PK identity, FK, dan index.
+
 	`CREATE TABLE shipments (
 		id         BIGINT AUTO_INCREMENT PRIMARY KEY,
 		order_id   BIGINT NOT NULL,
@@ -64,20 +61,18 @@ var mysqlMutations = []string{
 		CONSTRAINT fk_shipments_order FOREIGN KEY (order_id) REFERENCES orders (id) ON DELETE CASCADE
 	)`,
 	`CREATE INDEX idx_shipments_order ON shipments (order_id)`,
-	// Kolom di-drop, ditambah, dan default diubah.
+
 	`ALTER TABLE customers DROP COLUMN city`,
 	`ALTER TABLE customers ADD COLUMN nickname VARCHAR(50) NULL`,
 	`ALTER TABLE orders MODIFY COLUMN total DECIMAL(14,2) NOT NULL DEFAULT 0`,
-	// Index unik lama dilepas (unique = index di MySQL).
+
 	`ALTER TABLE customers DROP INDEX email`,
-	// FK dilepas.
+
 	`ALTER TABLE orders DROP FOREIGN KEY fk_orders_customer`,
-	// Tabel lama dibuang.
+
 	`DROP TABLE long_cells`,
 }
 
-// TestGeneratedSQLMySQL_MenyamakanSkemaAKeB: SQL generator mysql yang
-// diterapkan ke database A membuat skema A identik dengan B.
 func TestGeneratedSQLMySQL_MenyamakanSkemaAKeB(t *testing.T) {
 	ctx := context.Background()
 
@@ -94,8 +89,6 @@ func TestGeneratedSQLMySQL_MenyamakanSkemaAKeB(t *testing.T) {
 	modelA := mysqlSnapshot(t, cfgA)
 	modelB := mysqlSnapshot(t, cfgB)
 
-	// "schema" MySQL = nama database; tanpa penyetaraan, diff dua database
-	// berbeda nama terlihat sebagai drop+add seluruh skema (tanpa arti).
 	schemadiff.AlignModels(modelA, modelB)
 	changes := schemadiff.Diff(modelA, modelB)
 	require.NotEmpty(t, changes, "seed A dan B harus berbeda setelah mutasi")

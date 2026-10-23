@@ -25,7 +25,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/testutil"
 
-	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres" // daftarkan driver
+	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres"
 )
 
 const cipherKey = "REVWLU9OTFktREVWLU9OTFktREVWLU9OTFktREVWLU8="
@@ -36,7 +36,6 @@ func setup(t *testing.T) (*httptest.Server, *gen.Queries, *secret.Cipher) {
 	t.Cleanup(pool.Close)
 	q := gen.New(pool)
 
-	// Buat principal uji; created_by pada database_connections adalah FK ke users.
 	_, err := pool.Exec(context.Background(),
 		`INSERT INTO users (id, username, password_hash) VALUES (42, 'tester', 'x') ON CONFLICT DO NOTHING`)
 	require.NoError(t, err)
@@ -50,8 +49,7 @@ func setup(t *testing.T) (*httptest.Server, *gen.Queries, *secret.Cipher) {
 
 	svc := dbconn.NewService(store, reg, cipher, authz.NewFake())
 	r := httpx.NewRouter(slog.New(slog.NewTextHandler(io.Discard, nil)))
-	// Middleware uji: memasang principal seperti yang akan dilakukan session
-	// middleware milik Miguel (integrasi I-2).
+
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if u := req.Header.Get("X-Test-User"); u != "" {
@@ -63,7 +61,7 @@ func setup(t *testing.T) (*httptest.Server, *gen.Queries, *secret.Cipher) {
 			next.ServeHTTP(w, req)
 		})
 	})
-	// Samakan dengan cmd/server: semua route di bawah /api.
+
 	r.Route("/api", func(api chi.Router) {
 		dbconn.Routes(api, svc)
 	})
@@ -344,7 +342,7 @@ func TestUnauthenticatedWithoutPrincipal(t *testing.T) {
 }
 
 func TestLatencyIsSaneAndNotLeaky(t *testing.T) {
-	// Jaminan kecil bahwa hasil test koneksi tidak membawa DSN apa pun.
+
 	srv, _, _ := setup(t)
 	input := validInput()
 	input["host"] = "127.0.0.1"

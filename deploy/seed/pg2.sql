@@ -1,7 +1,3 @@
--- target-pg-2: "inventory" versi STAGING.
--- Sengaja BERBEDA dari pg1.sql (kolom attrs hilang, kolom region tambahan, tabel returns,
--- schema reporting tidak ada) supaya demo schema diff punya bahan nyata.
-
 CREATE SCHEMA inventory;
 
 CREATE TABLE inventory.warehouses (

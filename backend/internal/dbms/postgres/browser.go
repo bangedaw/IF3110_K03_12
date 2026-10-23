@@ -1,6 +1,3 @@
-// Browser menampilkan baris data target secara read-only: transaksi
-// READ ONLY + SET LOCAL statement_timeout, identifier selalu di-quote lewat
-// pgx.Identifier, dan kolom ORDER BY harus lolos whitelist introspeksi.
 package postgres
 
 import (
@@ -22,8 +19,7 @@ import (
 const (
 	browserStatementTimeout = 5 * time.Second
 	defaultRowsLimit        = 50
-	// maxCellLen: nilai sel lebih panjang dari ini dipotong (byte, tepi rune).
-	// ponytail: 256 cukup untuk Milestone 1; naikkan bila UI butuh pratinjau lebih.
+
 	maxCellLen = 256
 )
 
@@ -64,7 +60,7 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 		return nil, err
 	}
 	if len(cols) == 0 {
-		// Tabel tanpa kolom tidak bisa ditampilkan; cegah indeks kosong.
+
 		return nil, dbms.ErrNotFound
 	}
 	if q.OrderBy != "" && !slices.Contains(cols, q.OrderBy) {
@@ -143,19 +139,12 @@ func attributeNames(ctx context.Context, tx pgx.Tx, reg string) ([]string, error
 	return cols, rows.Err()
 }
 
-// rowsSQL membangun SELECT dari whitelist kolom hasil introspeksi.
-// Hanya dua sumber nilai tak-terpetakan: nama kolom dari atribut tabel
-// (sudah diverifikasi) dan dir dari whitelist asc/desc di normalizePage.
 func rowsSQL(reg string, cols []string, q dbms.RowsQuery, limit, offset int) string {
 	quoted := make([]string, len(cols))
 	for i, c := range cols {
 		quoted[i] = pgx.Identifier{c}.Sanitize() + "::text"
 	}
-	// ORDER BY memakai nama kolom yang memenuhi tabel ("app"."books"."id"):
-	// nama berkualifikasi tidak pernah merujuk output column (::text), jadi
-	// pengurutan tetap pada tipe asli (numerik), bukan teks. Default = kolom
-	// pertama. (Kurung tidak membantu: tanda kurung dihapus parser saat
-	// parse, sehingga (id) tetap dianggap nama output yang polos.)
+
 	orderBy := reg + "." + pgx.Identifier{cols[0]}.Sanitize()
 	if q.OrderBy != "" {
 		orderBy = reg + "." + pgx.Identifier{q.OrderBy}.Sanitize()
@@ -191,14 +180,13 @@ func normalizePage(q dbms.RowsQuery) (limit, offset int, err error) {
 	return limit, offset, nil
 }
 
-// cellOf mengubah nilai kolom (sudah ::text dari SQL) menjadi Cell aman JSON.
 func cellOf(v any) dbms.Cell {
 	if v == nil {
 		return dbms.Cell{IsNull: true}
 	}
 	s, ok := v.(string)
 	if !ok {
-		s = fmt.Sprint(v) // seharusnya tidak terjadi: semua kolom di-cast ::text
+		s = fmt.Sprint(v)
 	}
 	s, cut := truncateCell(s)
 	return dbms.Cell{Value: s, Truncated: cut}
@@ -215,8 +203,6 @@ func truncateCell(s string) (string, bool) {
 	return s[:cut], true
 }
 
-// rowsError memetakan error PG: statement timeout (57014) menjadi pesan
-// rapi tanpa membawa teks mentah PG; sisanya dibungkus sebagai konteks.
 func rowsError(err error) error {
 	if err == nil {
 		return nil

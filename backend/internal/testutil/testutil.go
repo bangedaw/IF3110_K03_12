@@ -1,10 +1,3 @@
-// Package testutil menyediakan container PostgreSQL/MySQL sungguhan untuk
-// test integration, satu container per package (dibuat lazy lewat sync.Once)
-// dan satu database terisolasi per panggilan helper.
-//
-// Fallback bila Docker tidak tersedia (lihat docs/risiko): set TEST_PG_URL
-// atau TEST_MYSQL_URL ke database dari `make dev`; helper memakai database
-// tersebut apa adanya sehingga isolasi antar test melemah.
 package testutil
 
 import (
@@ -48,7 +41,6 @@ var (
 	mysqlPort string
 )
 
-// NewPlatformDB mengembalikan pool ke platform DB segar yang sudah di-migrate.
 func NewPlatformDB(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	pool := newPostgresDatabase(t, "")
@@ -58,8 +50,6 @@ func NewPlatformDB(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// NewPostgresTarget mengembalikan pool ke database PostgreSQL target segar
-// dengan schema seed yang diketahui test (schema `app`).
 func NewPostgresTarget(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	pool := newPostgresDatabase(t, pgTargetSchema)
@@ -67,8 +57,6 @@ func NewPostgresTarget(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
-// MySQLTarget adalah parameter koneksi database MySQL target segar (seed
-// diketahui test) untuk driver dbms/mysql.
 type MySQLTarget struct {
 	Host     string
 	Port     int
@@ -77,8 +65,6 @@ type MySQLTarget struct {
 	Database string
 }
 
-// NewMySQLTarget mengembalikan koneksi ke database MySQL target segar dengan
-// schema seed yang diketahui test (tabel customers dan orders).
 func NewMySQLTarget(t *testing.T) *sql.DB {
 	t.Helper()
 	if dsn := os.Getenv("TEST_MYSQL_URL"); dsn != "" {
@@ -91,13 +77,10 @@ func NewMySQLTarget(t *testing.T) *sql.DB {
 	return db
 }
 
-// MySQLTargetConfig mengembalikan parameter koneksi (bukan *sql.DB) sehingga
-// test driver dbms/mysql bisa membuka koneksi lewat Driver.Open.
 func MySQLTargetConfig(t *testing.T) MySQLTarget {
 	t.Helper()
 	if dsn := os.Getenv("TEST_MYSQL_URL"); dsn != "" {
-		// ponytail: fallback TEST_MYSQL_URL dipakai apa adanya oleh
-		// NewMySQLTarget; Driver.Open test tidak didukung di jalur ini.
+
 		t.Skip("TEST_MYSQL_URL tidak menyediakan parameter host/port untuk Driver.Open")
 	}
 
@@ -106,7 +89,7 @@ func MySQLTargetConfig(t *testing.T) MySQLTarget {
 	host, port := mysqlCluster(t, ctx)
 
 	name := uniqueName("t")
-	// multiStatements: seed dieksekusi sebagai satu blob SQL berisi banyak statement.
+
 	root := openMySQL(t, mysqlDSN(host, portInt(port), "root", mysqlRootPass, "mysql")+"&multiStatements=true")
 	defer func() { _ = root.Close() }()
 	if _, err := root.ExecContext(ctx, "CREATE DATABASE `"+name+"`"); err != nil {
@@ -215,8 +198,6 @@ func openMySQL(t *testing.T, dsn string) *sql.DB {
 	return db
 }
 
-// postgresCluster mengembalikan DSN cluster PostgreSQL (dari container atau
-// TEST_PG_URL). Satu container dibagikan seluruh test di package ini.
 func postgresCluster(t *testing.T, ctx context.Context) string {
 	t.Helper()
 	postgresOnce.Do(func() {
@@ -291,8 +272,7 @@ func uniqueName(prefix string) string {
 }
 
 func replaceDatabase(dsn, name string) string {
-	// DSN selalu kita yang bentuk, jadi pergantian database cukup mengganti
-	// path setelah host:port.
+
 	for i := len(dsn) - 1; i >= 0; i-- {
 		if dsn[i] == '/' {
 			return dsn[:i+1] + name

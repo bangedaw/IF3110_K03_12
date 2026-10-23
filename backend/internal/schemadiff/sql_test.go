@@ -13,11 +13,8 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schemadiff"
 )
 
-// -update menulis ulang seluruh file golden (jalankan lalu review diff-nya).
 var update = flag.Bool("update", false, "tulis ulang file golden di testdata/")
 
-// helper model — definisi constraint/index ditulis persis seperti hasil
-// pg_get_constraintdef / pg_get_indexdef supaya golden file mewakili dunia nyata.
 func column(name, typ string, nullable bool, def string) schema.Column {
 	return schema.Column{Name: name, DataType: typ, Nullable: nullable, Default: def}
 }
@@ -72,7 +69,7 @@ func TestGenerateGolden(t *testing.T) {
 			from:    model(authorsFrom),
 			to: model(authorsFrom, table("reviews",
 				[]schema.Column{
-					// identity: PG melaporkan IsIdentity tanpa default.
+
 					{Name: "id", DataType: "bigint", IsIdentity: true, Ordinal: 1},
 					column("book_id", "bigint", false, ""),
 					column("body", "text", false, "''"),
@@ -101,7 +98,7 @@ func TestGenerateGolden(t *testing.T) {
 				[]schema.Column{
 					column("id", "bigint", false, ""),
 					column("title", "character varying(200)", false, ""),
-					// note dihapus; subtitle diencangkan; price tipenya berubah.
+
 					column("subtitle", "text", false, "''"),
 					column("price", "numeric(12,2)", false, "0"),
 				}, nil, nil)),
@@ -119,15 +116,13 @@ func TestGenerateGolden(t *testing.T) {
 				},
 				[]schema.Constraint{
 					{Name: "books_pkey", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (id)", Columns: []string{"id"}},
-					// FK dihapus; check baru ditambahkan.
+
 					{Name: "books_price_check", Type: schema.ConstraintCheck, Definition: "CHECK (price >= (0))", Columns: []string{"price"}},
 				},
 				[]schema.Index{{Name: "books_author_idx", Definition: "CREATE INDEX books_author_idx ON app.books USING btree (author_id, title)", Columns: []string{"author_id", "title"}}})),
 		},
 		{
-			// Semua fase urutan eksekusi: drop FK -> drop index -> drop column
-			// -> drop table -> alter column -> create table -> add column ->
-			// add constraint -> add index -> add FK.
+
 			name:    "postgres_full_order",
 			dialect: schema.KindPostgres,
 			from: model(authorsFrom, booksFrom, table("attachments",
@@ -149,7 +144,7 @@ func TestGenerateGolden(t *testing.T) {
 					column("id", "bigint", false, ""),
 					column("name", "text", false, ""),
 					column("email", "text", true, ""),
-					// homepage di-drop, bio ditambah.
+
 					column("bio", "text", true, ""),
 				},
 				[]schema.Constraint{{Name: "authors_pkey", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (id)", Columns: []string{"id"}}},
@@ -158,17 +153,17 @@ func TestGenerateGolden(t *testing.T) {
 					[]schema.Column{
 						column("id", "bigint", false, ""),
 						column("author_id", "bigint", false, ""),
-						// title berubah tipe, isbn baru, price berubah tipe.
+
 						column("title", "character varying(300)", false, ""),
 						column("price", "numeric(12,2)", false, "0"),
 						column("isbn", "character varying(20)", true, ""),
 					},
-					// FK ke authors dilepas, check baru dipasang.
+
 					[]schema.Constraint{
 						{Name: "books_pkey", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (id)", Columns: []string{"id"}},
 						{Name: "books_price_check", Type: schema.ConstraintCheck, Definition: "CHECK (price >= (0))", Columns: []string{"price"}},
 					},
-					// index diganti definisinya -> drop + add.
+
 					[]schema.Index{{Name: "books_author_idx", Definition: "CREATE INDEX books_author_idx ON app.books USING btree (author_id, title)", Columns: []string{"author_id", "title"}}}),
 				table("reviews",
 					[]schema.Column{
@@ -185,8 +180,7 @@ func TestGenerateGolden(t *testing.T) {
 					nil)),
 		},
 		{
-			// Dialek MySQL: RawType mentah (varchar/enum), definisi constraint
-			// dari information_schema (backtick), identity = AUTO_INCREMENT.
+
 			name:    "mysql_full_order",
 			dialect: schema.KindMySQL,
 			from: model(
@@ -224,7 +218,7 @@ func TestGenerateGolden(t *testing.T) {
 				table("customers",
 					[]schema.Column{
 						{Name: "id", RawType: "bigint", DataType: "bigint", IsIdentity: true, Ordinal: 1},
-						// email di-drop, phone ditambah.
+
 						{Name: "name", RawType: "varchar(120)", DataType: "character varying(120)", Ordinal: 2},
 						{Name: "phone", RawType: "varchar(40)", DataType: "character varying(40)", Nullable: true, Ordinal: 3},
 					},
@@ -235,8 +229,7 @@ func TestGenerateGolden(t *testing.T) {
 				table("orders",
 					[]schema.Column{
 						{Name: "id", RawType: "bigint", DataType: "bigint", IsIdentity: true, Ordinal: 1},
-						// customer_id di-encangkan ke varchar (FK dilepas dulu),
-						// total tipe berubah, city dihapus, note baru.
+
 						{Name: "customer_id", RawType: "varchar(40)", DataType: "character varying(40)", Nullable: true, Ordinal: 2},
 						{Name: "status", RawType: "enum('pending','paid','shipped')", DataType: "enum('pending','paid','shipped')", Default: "pending", Ordinal: 3},
 						{Name: "total", RawType: "decimal(14,2)", DataType: "numeric(14,2)", Default: "0.00", Ordinal: 4},
@@ -244,7 +237,7 @@ func TestGenerateGolden(t *testing.T) {
 					},
 					[]schema.Constraint{
 						{Name: "PRIMARY", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (`id`)", Columns: []string{"id"}},
-						// FK baru + check baru.
+
 						{Name: "chk_total", Type: schema.ConstraintCheck,
 							Definition: "CHECK (`total` >= 0)", Columns: []string{"total"}},
 					},
@@ -283,14 +276,12 @@ func TestGenerateGolden(t *testing.T) {
 }
 
 func TestGenerate_EmptyAndUnsupported(t *testing.T) {
-	// Tidak ada perubahan -> tidak ada SQL, bukan error.
+
 	res, err := schemadiff.Generate(schema.KindPostgres, nil)
 	require.NoError(t, err)
 	require.Empty(t, res.Statements)
 	require.Empty(t, res.Warnings)
 
-	// Dialect yang belum ada generator-nya -> error tegas, bukan SQL kosong
-	// yang dikira "tidak ada perubahan".
 	_, err = schemadiff.Generate("sqlite", []schemadiff.Change{{Kind: schemadiff.KindDropTable}})
 	require.ErrorIs(t, err, schemadiff.ErrUnsupportedDialect)
 }

@@ -1,6 +1,3 @@
-// Package secret mengenkripsi kredensial database target (password) dengan
-// AES-256-GCM. Format ciphertext: nonce 12 byte || ciphertext || auth tag.
-// Master key datang dari environment DBMP_SECRET_KEY (base64, 32 byte).
 package secret
 
 import (
@@ -14,15 +11,14 @@ import (
 )
 
 var (
-	// ErrInvalidKey dipakai saat master key tidak bisa dipakai (bukan base64 atau bukan 32 byte).
 	ErrInvalidKey = errors.New("master key tidak valid")
-	// ErrDecrypt dipakai saat data tidak bisa didekripsi (key salah atau data korup).
+
 	ErrDecrypt = errors.New("gagal mendekripsi")
 )
 
 const (
-	keySize   = 32 // AES-256
-	nonceSize = 12 // GCM standard nonce
+	keySize   = 32
+	nonceSize = 12
 )
 
 type Cipher struct {
@@ -50,8 +46,8 @@ func New(keyBase64 string) (*Cipher, error) {
 
 func (c *Cipher) Encrypt(plaintext []byte) []byte {
 	nonce := make([]byte, nonceSize)
-	_, _ = io.ReadFull(rand.Reader, nonce) // crypto/rand modern tidak pernah mengembalikan error
-	// Seal menulis nonce di depan ciphertext.
+	_, _ = io.ReadFull(rand.Reader, nonce)
+
 	return c.aead.Seal(nonce, nonce, plaintext, nil)
 }
 

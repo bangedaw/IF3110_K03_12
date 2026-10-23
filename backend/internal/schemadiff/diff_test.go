@@ -6,8 +6,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
-// helpers — tabel di skema "public" kalau tidak dinyatakan lain.
-
 func col(name string, typ string) schema.Column {
 	return schema.Column{Name: name, DataType: typ}
 }
@@ -44,7 +42,7 @@ func assertKinds(t *testing.T, got []Change, want ...string) {
 func TestDiff_IdenticalIsEmpty(t *testing.T) {
 	a := tbl("books", col("id", "bigint"), col("title", "text"))
 	b := tbl("books", col("id", "bigint"), col("title", "text"))
-	// RowEstimate sengaja dibuat berbeda: estimasi baris bukan perubahan skema.
+
 	a.RowEstimate, b.RowEstimate = 100, 99999
 
 	if cs := Diff(mdl(a), mdl(b)); len(cs) != 0 {
@@ -79,7 +77,7 @@ func TestDiff_DropTable(t *testing.T) {
 	if got[0].Name != "b" || !got[0].Destructive {
 		t.Fatalf("drop_table harus destruktif: %+v", got[0])
 	}
-	// Tabel yang dihapus tidak boleh ikut memuntahkan drop kolom/konstrainnya sendiri.
+
 	if len(got) != 1 {
 		t.Fatalf("drop_table tidak boleh diikuti perubahan lain: %v", kinds(got))
 	}
@@ -140,7 +138,6 @@ func TestDiff_NullableTightenedIsDestructive(t *testing.T) {
 		t.Fatal("nullable true->false wajib ditandai destruktif")
 	}
 
-	// longgarkan nullable: bukan destruktif
 	got = Diff(mdl(tbl("books", tight)), mdl(tbl("books", loose)))
 	assertKinds(t, got, KindAlterColumn)
 	if got[0].Destructive {
@@ -158,7 +155,6 @@ func TestDiff_ColumnDefaultChanged(t *testing.T) {
 		t.Fatal("ganti default bukan destruktif")
 	}
 
-	// default dihapus -> tetap alter
 	got = Diff(mdl(tbl("books", before)), mdl(tbl("books", col("stock", "integer"))))
 	assertKinds(t, got, KindAlterColumn)
 	if got[0].Previous.Default != "0" || got[0].Column.Default != "" {
@@ -167,7 +163,7 @@ func TestDiff_ColumnDefaultChanged(t *testing.T) {
 }
 
 func TestDiff_RawTypeOnlyIsNotAChange(t *testing.T) {
-	// RawType hanya untuk tampilan; diff memakai DataType yang sudah dinormalisasi.
+
 	before := schema.Column{Name: "id", DataType: "bigint", RawType: "int8"}
 	after := schema.Column{Name: "id", DataType: "bigint", RawType: "bigint"}
 
@@ -180,12 +176,10 @@ func TestDiff_ConstraintChanged(t *testing.T) {
 	pk := schema.Constraint{Name: "books_pkey", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (id)"}
 	changed := schema.Constraint{Name: "books_pkey", Type: schema.ConstraintPrimaryKey, Definition: "PRIMARY KEY (id, title)"}
 
-	// Model lama tanpa konstrain, model baru dengan konstrain -> add saja.
 	got := Diff(mdl(tbl("books", col("id", "bigint"))),
 		mdl(withConstraint(tbl("books", col("id", "bigint"), col("title", "text")), changed)))
 	assertKinds(t, got, KindAddColumn, KindAddConstraint)
 
-	// Definisi berubah -> drop + add (nama sama, isi beda).
 	got = Diff(mdl(withConstraint(tbl("books", col("id", "bigint")), pk)),
 		mdl(withConstraint(tbl("books", col("id", "bigint"), col("title", "text")), changed)))
 	assertKinds(t, got, KindAddColumn, KindDropConstraint, KindAddConstraint)
@@ -213,7 +207,6 @@ func TestDiff_IndexLifecycle(t *testing.T) {
 	idx := schema.Index{Name: "books_title_idx", Definition: "CREATE INDEX books_title_idx ON books USING btree (title)"}
 	changed := schema.Index{Name: "books_title_idx", Definition: "CREATE UNIQUE INDEX books_title_idx ON books USING btree (title)", Unique: true}
 
-	// tambah index
 	got := Diff(mdl(tbl("books", col("title", "text"))),
 		mdl(withIndex(tbl("books", col("title", "text")), idx)))
 	assertKinds(t, got, KindAddIndex)
@@ -221,7 +214,6 @@ func TestDiff_IndexLifecycle(t *testing.T) {
 		t.Fatalf("add_index harus membawa definisi: %+v", got[0])
 	}
 
-	// ubah index -> drop + add
 	got = Diff(mdl(withIndex(tbl("books", col("title", "text")), idx)),
 		mdl(withIndex(tbl("books", col("title", "text")), changed)))
 	assertKinds(t, got, KindDropIndex, KindAddIndex)
@@ -229,7 +221,6 @@ func TestDiff_IndexLifecycle(t *testing.T) {
 		t.Fatalf("drop harus membawa definisi lama, add definisi baru: %+v / %+v", got[0].Index, got[1].Index)
 	}
 
-	// hapus index
 	got = Diff(mdl(withIndex(tbl("books", col("title", "text")), idx)),
 		mdl(tbl("books", col("title", "text"))))
 	assertKinds(t, got, KindDropIndex)
@@ -259,10 +250,7 @@ func TestDiff_SchemaAddedAndRemoved(t *testing.T) {
 }
 
 func TestDiff_EmissionOrder(t *testing.T) {
-	// Spesifikasi §8.10: urutan global drop table -> drop column -> alter column ->
-	// add column -> drop constraint -> add constraint -> drop index -> add index.
-	// Urutannya bukan urutan eksekusi SQL; generator (Task 13) yang menata
-	// pernyataan agar aman dijalankan per tabel.
+
 	oldIdx := schema.Index{Name: "i_old", Definition: "CREATE INDEX i_old ON books USING btree (a)"}
 	newIdx := schema.Index{Name: "i_new", Definition: "CREATE INDEX i_new ON books USING btree (b)"}
 	oldC := schema.Constraint{Name: "c_old", Type: schema.ConstraintCheck, Definition: "CHECK (a > 0)"}
@@ -279,7 +267,7 @@ func TestDiff_EmissionOrder(t *testing.T) {
 }
 
 func TestDiff_NilModels(t *testing.T) {
-	// baseline -> new: semua tambahan; new -> baseline: semua drop destruktif.
+
 	b := mdl(tbl("books", col("id", "bigint")))
 	if got := Diff(nil, b); len(got) != 1 || got[0].Kind != KindAddTable {
 		t.Fatalf("Diff(nil, model) = %v, want satu add_table", kinds(got))
@@ -289,8 +277,6 @@ func TestDiff_NilModels(t *testing.T) {
 	}
 }
 
-// withConstraint / withIndex menempelkan objek ke tabel salinan agar helper
-// test tetap ringkas tanpa merusak tabel lain.
 func withConstraint(t schema.Table, cs ...schema.Constraint) schema.Table {
 	t.Constraints = append(t.Constraints, cs...)
 	return t

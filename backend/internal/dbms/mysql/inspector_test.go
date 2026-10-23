@@ -13,9 +13,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
-// inspectorFor membuka Inspector ke target MySQL segar (seed diketahui test:
-// tabel customers dan orders + index idx_orders_ordered_at). Satu config per
-// test: MySQLTargetConfig membuat database baru di tiap panggilan.
 func inspectorFor(t *testing.T, cfg dbms.ConnConfig) dbms.Inspector {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -37,7 +34,7 @@ func TestListSchemasExcludesSystem(t *testing.T) {
 		require.NotEqual(t, "performance_schema", s)
 		require.NotEqual(t, "sys", s)
 	}
-	// Database seed test tetap terlihat (schema MySQL = database).
+
 	require.NotEmpty(t, got)
 }
 
@@ -58,11 +55,9 @@ func TestListTablesKnownSchema(t *testing.T) {
 	require.Contains(t, byName, "customers")
 	require.Contains(t, byName, "orders")
 
-	// Estimasi baris informatif (TABLE_ROWS adalah perkiraan InnoDB).
 	require.Positive(t, byName["customers"].RowEstimate)
 	require.Positive(t, byName["orders"].RowEstimate)
 
-	// Urutan deterministik (abjad).
 	require.Equal(t, "customers", got[0].Name)
 	require.Equal(t, "long_cells", got[1].Name)
 	require.Equal(t, "orders", got[2].Name)
@@ -112,7 +107,6 @@ func TestDescribeTableColumns(t *testing.T) {
 	city := byName["city"]
 	require.True(t, city.Nullable)
 
-	// Ordinal sesuai urutan definisi kolom.
 	require.Equal(t, 1, byName["id"].Ordinal)
 	require.Equal(t, 4, byName["city"].Ordinal)
 }
@@ -218,7 +212,6 @@ func TestDescribeTableIsIdentifierSafe(t *testing.T) {
 	ins := inspectorFor(t, cfg)
 	dbName := cfg.Database
 
-	// Nama berbahaya ditolak sebagai tidak ditemukan, bukan dieksekusi.
 	_, err := ins.DescribeTable(context.Background(), dbName, "x`; DROP TABLE customers; --")
 	require.Error(t, err)
 	require.True(t, errors.Is(err, dbms.ErrNotFound))
@@ -236,7 +229,7 @@ func TestSnapshotWholeDatabase(t *testing.T) {
 	m, err := ins.Snapshot(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, m)
-	m.Sort() // idempoten: hasil sudah sorted
+	m.Sort()
 
 	for _, s := range m.Schemas {
 		require.NotContains(t,

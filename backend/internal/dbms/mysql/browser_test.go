@@ -11,8 +11,6 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/mysql"
 )
 
-// browserFixture: satu database segar per test (MySQLTargetConfig membuat
-// database baru di tiap panggilan, jadi config dibuat sekali lalu dibagikan).
 type browserFixture struct {
 	cfg     dbms.ConnConfig
 	browser dbms.DataBrowser
@@ -60,7 +58,6 @@ func TestRowsPagination(t *testing.T) {
 	require.Empty(t, beyond.Rows)
 	require.Positive(t, beyond.TotalEstimate)
 
-	// Limit 0 = default; limit > MaxRows di-clamp.
 	def := f.rows(t, dbms.RowsQuery{Table: "orders"})
 	require.Equal(t, 50, def.Limit)
 	big := f.rows(t, dbms.RowsQuery{Table: "orders", Limit: 10_000})
@@ -75,12 +72,10 @@ func TestRowsOrderBy(t *testing.T) {
 	asc := f.rows(t, dbms.RowsQuery{Table: "orders", Limit: 5, OrderBy: "total"})
 	require.Equal(t, "21000.00", asc.Rows[0][3].Value, "total terkecil dulu")
 
-	// Kolom urut tidak ada -> error validasi (bukan 500/404).
 	_, err := f.browser.Rows(context.Background(),
 		dbms.RowsQuery{Schema: f.cfg.Database, Table: "orders", OrderBy: "tidak_ada"})
 	require.Error(t, err)
 
-	// Arah tidak dikenal -> error.
 	_, err = f.browser.Rows(context.Background(),
 		dbms.RowsQuery{Schema: f.cfg.Database, Table: "orders", OrderDir: "sideways"})
 	require.Error(t, err)
@@ -90,7 +85,7 @@ func TestRowsIsNullCell(t *testing.T) {
 	f := newBrowserFixture(t)
 	page := f.rows(t, dbms.RowsQuery{Table: "customers", OrderBy: "id"})
 	require.Len(t, page.Rows, 3)
-	// city Budi NULL.
+
 	require.True(t, page.Rows[1][3].IsNull)
 	require.False(t, page.Rows[0][3].IsNull)
 }
@@ -101,7 +96,6 @@ func TestRowsUnknownTableNotFound(t *testing.T) {
 		dbms.RowsQuery{Schema: f.cfg.Database, Table: "tidak_ada"})
 	require.ErrorIs(t, err, dbms.ErrNotFound)
 
-	// Schema sistem ditolak.
 	_, err = f.browser.Rows(context.Background(),
 		dbms.RowsQuery{Schema: "mysql", Table: "user"})
 	require.ErrorIs(t, err, dbms.ErrNotFound)
@@ -109,13 +103,11 @@ func TestRowsUnknownTableNotFound(t *testing.T) {
 
 func TestRowsIsIdentifierSafe(t *testing.T) {
 	f := newBrowserFixture(t)
-	// Identifier berbahaya tidak ditemukan (divalidasi lewat introspeksi),
-	// bukan dieksekusi.
+
 	_, err := f.browser.Rows(context.Background(),
 		dbms.RowsQuery{Schema: f.cfg.Database, Table: "orders`; DROP TABLE customers; --"})
 	require.ErrorIs(t, err, dbms.ErrNotFound)
 
-	// Tabel asli masih ada.
 	page := f.rows(t, dbms.RowsQuery{Table: "customers"})
 	require.Len(t, page.Rows, 3)
 }

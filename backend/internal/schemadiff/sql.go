@@ -8,21 +8,13 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
-// ErrUnsupportedDialect dipakai bila belum ada generator untuk dialect target.
-// MySQL menyusul (Task 14); error tegas lebih baik daripada mengembalikan SQL
-// kosong yang disalahtafsirkan "tidak ada perubahan".
 var ErrUnsupportedDialect = errors.New("belum ada generator SQL untuk database ini")
 
-// Result adalah SQL yang siap dieksekusi beserta peringatan untuk user.
 type Result struct {
 	Statements []string
 	Warnings   []string
 }
 
-// Urutan eksekusi aman (spesifikasi §8.10): FK lama dilepas dulu supaya drop
-// column/table tidak bentrok, constraint/index lama bersih sebelum kolomnya
-// disentuh, table baru dibuat sebelum dikolom/di-constraint, dan FK baru
-// paling akhir karena menunggu tabel rujukannya ada.
 const (
 	phaseDropFK = iota
 	phaseDropConstraint
@@ -38,9 +30,6 @@ const (
 	phaseCount
 )
 
-// Generate mengubah daftar perubahan menjadi pernyataan SQL untuk dialect
-// tertentu. Urutan pernyataan mengikuti urutan eksekusi aman di atas, bukan
-// urutan masuknya perubahan.
 func Generate(dialect string, changes []Change) (Result, error) {
 	var g generator
 	switch dialect {
@@ -52,7 +41,6 @@ func Generate(dialect string, changes []Change) (Result, error) {
 		return Result{}, fmt.Errorf("%w: %q", ErrUnsupportedDialect, dialect)
 	}
 
-	// Buckets per fase; stable agar deterministik.
 	buckets := make([][]stmt, phaseCount)
 	var out Result
 
@@ -70,7 +58,6 @@ func Generate(dialect string, changes []Change) (Result, error) {
 	return out, nil
 }
 
-// generator adalah backend per-dialek.
 type generator interface {
 	statements(c Change) []stmt
 	warnings(c Change) []string
@@ -87,9 +74,6 @@ type stmt struct {
 
 type pgGen struct{ autoIndex map[string]bool }
 
-// newPgGen membangun pre-scan: index yang namanya sama dengan constraint yang
-// ikut dipasang adalah index milik constraint (PK/UNIQUE) — PG membuatnya
-// otomatis, jadi CREATE INDEX untuk namanya pasti gagal "sudah ada".
 func newPgGen(changes []Change) *pgGen {
 	g := &pgGen{autoIndex: map[string]bool{}}
 	for _, c := range changes {
@@ -105,7 +89,6 @@ func newPgGen(changes []Change) *pgGen {
 	return g
 }
 
-// statements memetakan satu perubahan ke pernyataan + fasesnya.
 func (g pgGen) statements(c Change) []stmt {
 	switch c.Kind {
 	case KindDropTable:
@@ -130,8 +113,7 @@ func (g pgGen) statements(c Change) []stmt {
 		if c.Constraint == nil || c.Constraint.Definition == "" {
 			return nil
 		}
-		// Definisi dari pg_get_constraintdef sudah persis bagian setelah
-		// "ADD CONSTRAINT <nama>" — tempel apa adanya.
+
 		phase := phaseAddConstraint
 		if c.Constraint.Type == "foreign_key" {
 			phase = phaseAddFK
@@ -139,7 +121,7 @@ func (g pgGen) statements(c Change) []stmt {
 		return []stmt{{phase, fmt.Sprintf("ALTER TABLE %s ADD CONSTRAINT %s %s",
 			qualified(c.Schema, c.Table), quote(c.Name), c.Constraint.Definition)}}
 	case KindDropIndex:
-		// IF EXISTS: index bisa saja ikut terhapus bersama constraint uniknya.
+
 		return []stmt{{phaseDropIndex, fmt.Sprintf("DROP INDEX IF EXISTS %s",
 			qualified(c.Schema, c.Name))}}
 	case KindAddIndex:
@@ -149,8 +131,6 @@ func (g pgGen) statements(c Change) []stmt {
 	}
 }
 
-// addTable memecah add_table menjadi CREATE TABLE + constraint/index baru
-// (constraint/index mengikuti fase masing-masing supaya FK tetap terakhir).
 func (g pgGen) addTable(c Change) []stmt {
 	if c.TableDef == nil {
 		return nil
@@ -158,8 +138,7 @@ func (g pgGen) addTable(c Change) []stmt {
 	var defs []string
 	for _, col := range c.TableDef.Columns {
 		if col.IsGenerated {
-			// Ekspresi generated column tidak tersimpan di model; SQL yang
-			// ditebak akan salah, jadi dilewati dan dilaporkan lewat warning.
+
 			continue
 		}
 		defs = append(defs, "  "+columnDef(col))
@@ -186,13 +165,11 @@ func (g pgGen) addIndex(c Change) []stmt {
 	if c.Index == nil {
 		return nil
 	}
-	// Index milik constraint PK/UNIQUE sudah dibuat oleh ADD CONSTRAINT;
-	// membuat ulang pasti gagal "relation sudah ada".
+
 	if g.autoIndex[indexKey(c.Schema, c.Table, c.Name)] {
 		return nil
 	}
-	// pg_get_indexdef menghasilkan pernyataan CREATE INDEX utuh — pakai
-	// apa adanya supaya metode/kolom/klausa tidak salah tulis ulang.
+
 	if c.Index.Definition != "" {
 		return []stmt{{phaseAddIndex, c.Index.Definition}}
 	}
@@ -200,8 +177,6 @@ func (g pgGen) addIndex(c Change) []stmt {
 		quote(c.Name), qualified(c.Schema, c.Table), strings.Join(c.Index.Columns, ", "))}}
 }
 
-// alterColumn: satu aspek per pernyataan (tipe, nullability, default) supaya
-// kegagalan menunjuk tepat pada bagian yang bermasalah.
 func alterColumn(c Change) []stmt {
 	if c.Column == nil || c.Previous == nil {
 		return nil
@@ -281,15 +256,13 @@ func alterWarnings(c Change) []string {
 	return out
 }
 
-// columnDef merender definisi kolom untuk CREATE/ADD COLUMN.
 func columnDef(c schema.Column) string {
 	var b strings.Builder
 	b.WriteString(quote(c.Name))
 	b.WriteString(" ")
 	b.WriteString(c.DataType)
 	if c.IsIdentity {
-		// Model tidak menyimpan ALWAYS vs BY DEFAULT; keduanya diperlakukan
-		// sama karena diff tidak membandingkan gaya identity.
+
 		b.WriteString(" GENERATED BY DEFAULT AS IDENTITY")
 	}
 	if !c.Nullable {

@@ -1,6 +1,3 @@
-// Browser menampilkan baris data target secara read-only: transaksi
-// READ ONLY + SET SESSION max_execution_time, identifier selalu di-quote
-// backtick, dan kolom ORDER BY harus lolos whitelist introspeksi.
 package mysql
 
 import (
@@ -21,21 +18,20 @@ import (
 const (
 	browserStatementTimeout = 5 * time.Second
 	defaultRowsLimit        = 50
-	// maxCellLen: nilai sel lebih panjang dari ini dipotong (byte, tepi rune).
-	// ponytail: 256 cukup untuk Milestone 1; naikkan bila UI butuh pratinjau lebih.
+
 	maxCellLen = 256
 )
 
 type Browser struct {
 	db *sql.DB
-	// database: tujuan koneksi; satu-satunya "schema" yang bisa dibaca.
+
 	database string
 }
 
 var _ dbms.DataBrowser = (*Browser)(nil)
 
 func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, error) {
-	// Sama seperti Inspector: hanya database tujuan koneksi yang terlihat.
+
 	if q.Schema != b.database || excludedSchema(q.Schema) {
 		return nil, dbms.ErrNotFound
 	}
@@ -50,13 +46,10 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// READ ONLY: membuktikan niat baca di sisi server (MySQL 8 mendukung
-	// START TRANSACTION READ ONLY).
 	if _, err := tx.ExecContext(ctx, "START TRANSACTION READ ONLY"); err != nil {
 		return nil, fmt.Errorf("mulai transaksi baca: %w", err)
 	}
-	// Batas waktu eksekusi SELECT (ms); sesi pool dibatasi, jadi dikembalikan
-	// ke nol setelah selesai supaya sesi berikutnya tidak ikut kena.
+
 	if _, err := tx.ExecContext(ctx,
 		fmt.Sprintf("SET SESSION max_execution_time = %d", browserStatementTimeout.Milliseconds())); err != nil {
 		return nil, fmt.Errorf("atur batas waktu: %w", err)
@@ -73,7 +66,7 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 		return nil, err
 	}
 	if len(cols) == 0 {
-		// Tabel tanpa kolom tidak bisa ditampilkan; cegah indeks kosong.
+
 		return nil, dbms.ErrNotFound
 	}
 	if q.OrderBy != "" && !slices.Contains(cols, q.OrderBy) {
@@ -95,7 +88,7 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 		Offset:        offset,
 	}
 	for rows.Next() {
-		// Semua kolom sudah CAST CHAR; []byte nil = NULL.
+
 		vals := make([][]byte, len(cols))
 		ptrs := make([]any, len(cols))
 		for i := range vals {
@@ -158,15 +151,11 @@ func columnNames(ctx context.Context, tx *sql.Tx, schemaName, table string) ([]s
 	return cols, rows.Err()
 }
 
-// rowsSQL membangun SELECT dari whitelist kolom hasil introspeksi. Hanya dua
-// sumber nilai tak-terpetakan: nama kolom dari information_schema (sudah
-// diverifikasi) dan dir dari whitelist asc/desc di normalizePage.
 func rowsSQL(schemaName, table string, cols []string, q dbms.RowsQuery, limit, offset int) string {
 	reg := backtickQualified(schemaName, table)
 	quoted := make([]string, len(cols))
 	for i, c := range cols {
-		// CAST ke CHAR: semua nilai sampai ke Go sebagai teks, sama seperti
-		// ::text di PostgreSQL (blob/json tidak bisa di-Scan apa adanya).
+
 		quoted[i] = "CAST(" + backtick(c) + " AS CHAR)"
 	}
 	orderBy := reg + "." + backtick(cols[0])
@@ -203,14 +192,12 @@ func normalizePage(q dbms.RowsQuery) (limit, offset int, err error) {
 	return limit, offset, nil
 }
 
-// cellOf mengubah nilai kolom (sudah CAST CHAR dari SQL) menjadi Cell aman
-// JSON: []byte dipotong tepat di batas, NULL menjadi IsNull.
 func cellOf(v any) dbms.Cell {
 	switch t := v.(type) {
 	case nil:
 		return dbms.Cell{IsNull: true}
 	case []byte:
-		if t == nil { // NULL: driver mengirim []byte nil, interface tetap terisi
+		if t == nil {
 			return dbms.Cell{IsNull: true}
 		}
 		s, cut := truncateCell(string(t))
@@ -234,8 +221,6 @@ func truncateCell(s string) (string, bool) {
 	return s[:cut], true
 }
 
-// rowsError memetakan error MySQL: timeout (1317 query interrupted /
-// 3024 max_execution_time) menjadi pesan rapi; sisanya dibungkus konteks.
 func rowsError(err error) error {
 	if err == nil {
 		return nil

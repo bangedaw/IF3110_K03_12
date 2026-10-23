@@ -1,9 +1,5 @@
 package testutil
 
-// Schema seed yang diketahui test inspector dan data browser.
-// Sengaja memuat: 2 schema, FK, UNIQUE, CHECK, index, view, tipe bytea/array,
-// dan kolom yang bisa bernilai NULL.
-
 const pgTargetSchema = `
 CREATE SCHEMA app;
 
