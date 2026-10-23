@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/config"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
@@ -25,6 +26,7 @@ var errInvalidCredentials = apperr.New(apperr.CodeUnauthenticated, "username ata
 type Service struct {
 	pool    *pgxpool.Pool
 	q       *gen.Queries
+	audit   *audit.Logger
 	cfg     config.Session
 	csrfKey []byte
 	secure  bool
@@ -32,7 +34,7 @@ type Service struct {
 }
 
 func NewService(pool *pgxpool.Pool, cfg config.Session, csrfKey string, secureCookie bool) *Service {
-	return &Service{pool: pool, q: gen.New(pool), cfg: cfg, csrfKey: []byte(csrfKey), secure: secureCookie, now: time.Now}
+	return &Service{pool: pool, q: gen.New(pool), audit: audit.New(pool), cfg: cfg, csrfKey: []byte(csrfKey), secure: secureCookie, now: time.Now}
 }
 
 type Session struct {

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -186,4 +187,39 @@ func TestCSRF(t *testing.T) {
 	}
 
 	assert.Equal(t, http.StatusNoContent, request(t, h, http.MethodPost, "/api/auth/logout", "", c, token).Code)
+}
+
+func TestLoginIsAudited(t *testing.T) {
+	svc, pool, _ := newTestService(t)
+	id := createUser(t, pool, "alice", "rahasia123", true)
+	h := newTestRouter(svc)
+
+	request(t, h, http.MethodPost, "/api/auth/login", `{"username":"alice","password":"salahsekali"}`, nil)
+	request(t, h, http.MethodPost, "/api/auth/login", `{"username":"alice","password":"rahasia123"}`, nil)
+
+	rows, err := pool.Query(context.Background(),
+		`SELECT outcome, actor_user_id, metadata::text FROM audit_logs WHERE action = 'auth.login' ORDER BY id`)
+	require.NoError(t, err)
+	type row struct {
+		outcome string
+		actor   *int64
+		meta    string
+	}
+	var got []row
+	for rows.Next() {
+		var r row
+		require.NoError(t, rows.Scan(&r.outcome, &r.actor, &r.meta))
+		got = append(got, r)
+	}
+	require.NoError(t, rows.Err())
+	require.Len(t, got, 2)
+	assert.Equal(t, "failure", got[0].outcome)
+	assert.Nil(t, got[0].actor)
+	assert.Equal(t, "success", got[1].outcome)
+	assert.Equal(t, id, *got[1].actor)
+	for _, r := range got {
+		assert.Contains(t, r.meta, "alice")
+		assert.NotContains(t, r.meta, "rahasia123")
+		assert.NotContains(t, r.meta, "salahsekali")
+	}
 }

@@ -1,9 +1,11 @@
 package auth
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apigen"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/httpx"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 )
@@ -65,12 +68,19 @@ func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.UserAgent(),
 		IP:        clientIP(r),
 	})
+	entry := audit.Entry{Action: "auth.login", ResourceType: "user", Outcome: audit.OutcomeSuccess, Metadata: map[string]any{"username": in.Username}}
 	if err != nil {
+		if errors.Is(err, errInvalidCredentials) {
+			entry.Outcome = audit.OutcomeFailure
+			s.audit.Record(r.Context(), entry)
+		}
 		httpx.Error(w, r, err)
 		return
 	}
+	entry.ActorID, entry.ResourceID = user.ID, strconv.FormatInt(user.ID, 10)
+	s.audit.Record(r.Context(), entry)
 	s.setCookie(w, sess.NewToken, sess.ExpiresAt)
-	httpx.JSON(w, http.StatusOK, apigen.AuthSession{User: toAPIUser(user), CsrfToken: s.csrfToken(sess.FamilyID)})
+	httpx.JSON(w, http.StatusOK, apigen.AuthSession{User: ToAPIUser(user), CsrfToken: s.csrfToken(sess.FamilyID)})
 }
 
 func (s *Service) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -91,7 +101,7 @@ func (s *Service) handleMe(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, r, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, apigen.AuthSession{User: toAPIUser(user), CsrfToken: s.csrfToken(id)})
+	httpx.JSON(w, http.StatusOK, apigen.AuthSession{User: ToAPIUser(user), CsrfToken: s.csrfToken(id)})
 }
 
 func (s *Service) setCookie(w http.ResponseWriter, token string, expires time.Time) {
@@ -130,14 +140,14 @@ func clientIP(r *http.Request) *netip.Addr {
 	return &ip
 }
 
-func toAPIUser(u gen.User) apigen.User {
+func ToAPIUser(u gen.User) apigen.User {
 	return apigen.User{
 		Id:              u.ID,
 		Username:        u.Username,
 		DisplayName:     u.DisplayName,
 		IsPlatformAdmin: u.IsPlatformAdmin,
 		IsActive:        u.IsActive,
-		CreatedAt:       u.CreatedAt.Time,
-		UpdatedAt:       u.UpdatedAt.Time,
+		CreatedAt:       u.CreatedAt.Time.UTC(),
+		UpdatedAt:       u.UpdatedAt.Time.UTC(),
 	}
 }
