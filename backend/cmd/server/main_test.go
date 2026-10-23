@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -73,7 +74,8 @@ func TestServerWiring(t *testing.T) {
 			RotationInterval: 15 * time.Minute, GracePeriod: 30 * time.Second, TouchInterval: time.Minute,
 		},
 	}
-	h, cleanup, err := newHandler(cfg, pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	spa := fstest.MapFS{"index.html": {Data: []byte("<div id=root></div>")}}
+	h, cleanup, err := newHandler(cfg, pool, slog.New(slog.NewTextHandler(io.Discard, nil)), spa)
 	require.NoError(t, err)
 	t.Cleanup(cleanup)
 
@@ -82,6 +84,12 @@ func TestServerWiring(t *testing.T) {
 	for _, path := range []string{"/api/auth/me", "/api/databases", "/api/admin/databases"} {
 		assert.Equal(t, http.StatusUnauthorized, anon.do(http.MethodGet, path, "").Code, path)
 	}
+	rec := anon.do(http.MethodGet, "/api/tidak-ada", "")
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
+	rec = anon.do(http.MethodGet, "/databases/1/schemas/app/tables/books", "")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "<div id=root></div>", rec.Body.String())
 
 	alice := &client{t: t, h: h}
 	alice.login("alice")
@@ -97,7 +105,7 @@ func TestServerWiring(t *testing.T) {
 	body := `{"name":"x","kind":"postgres","host":"localhost","port":1,"database":"x","username":"x","password":"x"}`
 	csrf := admin.csrf
 	admin.csrf = ""
-	rec := admin.do(http.MethodPost, "/api/admin/databases", body)
+	rec = admin.do(http.MethodPost, "/api/admin/databases", body)
 	assert.Equal(t, http.StatusForbidden, rec.Code)
 	assert.Contains(t, rec.Body.String(), "CSRF_INVALID")
 	admin.csrf = csrf

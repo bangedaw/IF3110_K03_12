@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/web"
 
 	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/mysql"
 	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres"
@@ -57,7 +59,7 @@ func run() error {
 		return err
 	}
 
-	handler, cleanup, err := newHandler(cfg, pool, logger)
+	handler, cleanup, err := newHandler(cfg, pool, logger, web.Dist())
 	if err != nil {
 		return err
 	}
@@ -82,7 +84,7 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (http.Handler, func(), error) {
+func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, spa fs.FS) (http.Handler, func(), error) {
 	cipher, err := secret.New(cfg.SecretKey)
 	if err != nil {
 		return nil, nil, err
@@ -112,5 +114,8 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 			explorer.Routes(p, explorer.NewService(store, registry, az))
 		})
 	})
+	if h, ok := web.Handler(spa); ok {
+		r.Handle("/*", h)
+	}
 	return r, registry.Close, nil
 }
