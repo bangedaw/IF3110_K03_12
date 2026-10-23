@@ -60,11 +60,10 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 		return nil, err
 	}
 	if len(cols) == 0 {
-
 		return nil, dbms.ErrNotFound
 	}
 	if q.OrderBy != "" && !slices.Contains(cols, q.OrderBy) {
-		return nil, errors.New("kolom urut tidak valid")
+		return nil, fmt.Errorf("%w: kolom urut tidak valid", dbms.ErrInvalidQuery)
 	}
 
 	query := rowsSQL(reg, cols, q, limit, offset)
@@ -175,7 +174,7 @@ func normalizePage(q dbms.RowsQuery) (limit, offset int, err error) {
 	switch strings.ToLower(q.OrderDir) {
 	case "", "asc", "desc":
 	default:
-		return 0, 0, errors.New("arah urut tidak valid")
+		return 0, 0, fmt.Errorf("%w: arah urut tidak valid", dbms.ErrInvalidQuery)
 	}
 	return limit, offset, nil
 }

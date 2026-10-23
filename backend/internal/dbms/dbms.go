@@ -18,6 +18,8 @@ var (
 	ErrNotFound = errors.New("objek tidak ditemukan di database target")
 
 	ErrNotImplemented = errors.New("belum diimplementasi")
+
+	ErrInvalidQuery = errors.New("query tidak valid")
 )
 
 type ConnConfig struct {

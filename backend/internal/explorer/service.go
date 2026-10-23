@@ -94,7 +94,6 @@ func (s *Service) Databases(ctx context.Context, p authz.Principal) ([]Database,
 }
 
 func (s *Service) Database(ctx context.Context, p authz.Principal, id int64) (*DatabaseDetail, error) {
-
 	if err := s.az.Authorize(ctx, p, authz.ActionDBView, authz.Resource{DatabaseID: id}); err != nil {
 		return nil, err
 	}
@@ -296,10 +295,14 @@ func (s *Service) SchemaDiff(ctx context.Context, p authz.Principal, databaseID 
 		}
 		return nil, err
 	}
+	warnings := res.Warnings
+	if warnings == nil {
+		warnings = []string{}
+	}
 	return &SchemaDiffResult{
 		Changes:  changes,
 		SQL:      strings.Join(res.Statements, ";\n"),
-		Warnings: res.Warnings,
+		Warnings: warnings,
 	}, nil
 }
 
@@ -357,6 +360,9 @@ func mapTargetErr(err error) error {
 	}
 	if errors.Is(err, dbms.ErrNotFound) {
 		return apperr.ErrNotFound
+	}
+	if errors.Is(err, dbms.ErrInvalidQuery) {
+		return apperr.Validation(map[string]string{"query": strings.TrimPrefix(err.Error(), dbms.ErrInvalidQuery.Error()+": ")})
 	}
 	var ae *apperr.Error
 	if errors.As(err, &ae) {
