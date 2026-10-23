@@ -32,18 +32,12 @@ jobs:
         with:
           go-version-file: backend/go.mod
           cache-dependency-path: backend/go.sum
-      - uses: pnpm/action-setup@v4
-        if: hashFiles('frontend/package.json') != ''
-        with:
-          package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
-        if: hashFiles('frontend/package.json') != ''
         with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - run: pnpm install --frozen-lockfile
-        if: hashFiles('frontend/package.json') != ''
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
         working-directory: frontend
       - run: make gen
       - name: Kode generated harus up to date
@@ -56,24 +50,13 @@ jobs:
         working-directory: frontend
     steps:
       - uses: actions/checkout@v4
-      - name: Cek frontend ada
-        id: fe
-        working-directory: .
-        run: echo "exists=$([ -f frontend/package.json ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
-      - uses: pnpm/action-setup@v4
-        if: steps.fe.outputs.exists == 'true'
-        with:
-          package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
-        if: steps.fe.outputs.exists == 'true'
         with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-      - if: steps.fe.outputs.exists == 'true'
-        run: |
-          pnpm install --frozen-lockfile
-          pnpm run --if-present lint
-          pnpm run --if-present typecheck
-          pnpm run --if-present test
-          pnpm run build
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
