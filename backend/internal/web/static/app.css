@@ -134,3 +134,5 @@ textarea.code { min-height: 18rem; font-size: .85rem; white-space: pre; }
 h3 { font-size: 1rem; margin: 1rem 0 .5rem; }
 
 .auth-card { max-width: 24rem; margin: 3rem auto; }
+
+.mig-sql { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem; margin: .5rem 0; font-size: .85rem; }

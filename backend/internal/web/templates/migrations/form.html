@@ -1,0 +1,13 @@
+{{define "title"}}Migration baru · {{.Data.Header.DB.Name}}{{end}}
+{{define "content"}}
+{{template "dbheader" .}}
+<h2>Migration baru</h2>
+<form class="card" method="post" action="{{.Data.Action}}" novalidate>
+  {{template "csrf" .}}
+  {{template "mig_fields" .Data}}
+  <div class="actions">
+    <button class="btn" type="submit">Simpan draft</button>
+    <a class="btn btn-ghost" href="/databases/{{.Data.Header.DB.ID}}/migrations">Batal</a>
+  </div>
+</form>
+{{end}}

@@ -1,0 +1,30 @@
+{{define "title"}}Riwayat · {{.Data.Header.DB.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data}}
+{{template "dbheader" .}}
+{{if $d.Runs}}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Versi</th><th>Migration</th><th>Status</th><th>Pelaksana</th><th>Mulai</th><th>Selesai</th><th>SQL / keterangan</th></tr></thead>
+  <tbody>
+  {{range $d.Runs}}<tr>
+    <td>{{with .Version}}{{.}}{{else}}-{{end}}</td>
+    <td><a href="/databases/{{.DatabaseID}}/migrations/{{.MigrationID}}">#{{.MigrationID}} {{.Title}}</a></td>
+    <td>{{template "mig_run_status" .}}</td>
+    <td>{{.ExecutedByName}}</td>
+    <td>{{fmtTime .StartedAt}}</td>
+    <td>{{with .FinishedAt}}{{fmtTime .}}{{else}}-{{end}}</td>
+    <td>
+      {{if .ErrorMessage}}<p>{{with .FailedStatementIndex}}Statement {{.}}: {{end}}{{.ErrorMessage}}</p>{{end}}
+      <details><summary>Lihat SQL</summary><pre class="mig-sql">{{.SQL}}</pre></details>
+    </td>
+  </tr>{{end}}
+  </tbody>
+</table>
+</div>
+<div class="actions">
+  {{if $d.PrevURL}}<a class="btn btn-secondary" href="{{$d.PrevURL}}" rel="prev">Sebelumnya</a>{{end}}
+  {{if $d.NextURL}}<a class="btn btn-secondary" href="{{$d.NextURL}}" rel="next">Berikutnya</a>{{end}}
+</div>
+{{else}}<p class="empty">Belum ada migration yang dijalankan pada database ini.</p>{{end}}
+{{end}}

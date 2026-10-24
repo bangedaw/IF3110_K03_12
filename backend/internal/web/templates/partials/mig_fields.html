@@ -1,0 +1,19 @@
+{{define "mig_fields"}}{{if index .Errors "form"}}<div class="notice notice-danger" role="alert">{{index .Errors "form"}}</div>{{end}}
+<div class="field">
+  <label for="title">Judul</label>
+  <input id="title" name="title" type="text" maxlength="200" value="{{.Title}}" required{{if index .Errors "title"}} class="is-invalid" aria-invalid="true"{{end}}>
+  {{with index .Errors "title"}}<span class="error" role="alert">{{.}}</span>{{end}}
+</div>
+<div class="field">
+  <label for="description">Deskripsi</label>
+  <input id="description" name="description" type="text" maxlength="2000" value="{{.Description}}"{{if index .Errors "description"}} class="is-invalid" aria-invalid="true"{{end}}>
+  {{with index .Errors "description"}}<span class="error" role="alert">{{.}}</span>{{end}}
+</div>
+<div class="field">
+  <label for="sql">SQL</label>
+  <textarea id="sql" name="sql" class="code" spellcheck="false" required{{if index .Errors "sql"}} aria-invalid="true"{{end}}>{{.SQL}}</textarea>
+  {{with index .Errors "sql"}}<span class="error" role="alert">{{.}}</span>{{end}}
+  <span class="hint">Pisahkan statement dengan titik koma. Jangan menulis BEGIN/COMMIT/ROLLBACK: platform menjalankan seluruh migration dalam satu transaction.</span>
+  {{if .IsMySQL}}<span class="hint">MySQL: statement DDL melakukan implicit commit, sehingga kegagalan di tengah dapat meninggalkan perubahan parsial.</span>{{end}}
+</div>
+<input type="hidden" name="revision" value="{{.Revision}}">{{end}}

@@ -23,6 +23,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbconn"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/explorer"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/migration"
 )
 
 //go:embed templates static
@@ -50,28 +51,33 @@ type Deps struct {
 	Connections *dbconn.Service
 	Admin       *admin.Service
 	Explorer    *explorer.Service
+	Migrations  *migration.Service
 	Drafts      DraftSaver
 	Reload      bool
 	AssetsDir   string
 }
 
 type Server struct {
-	logger    *slog.Logger
-	guard     Guard
-	az        authz.Authorizer
-	conns     *dbconn.Service
-	admin     *admin.Service
-	explorer  *explorer.Service
-	drafts    DraftSaver
-	templates *templateSet
-	static    http.Handler
-	nav       []NavItem
-	dbTabs    []DatabaseTab
+	logger     *slog.Logger
+	guard      Guard
+	az         authz.Authorizer
+	conns      *dbconn.Service
+	admin      *admin.Service
+	explorer   *explorer.Service
+	migrations *migration.Service
+	drafts     DraftSaver
+	templates  *templateSet
+	static     http.Handler
+	nav        []NavItem
+	dbTabs     []DatabaseTab
 }
 
 func New(d Deps) (*Server, error) {
 	if d.Logger == nil {
 		d.Logger = slog.Default()
+	}
+	if d.Migrations != nil && d.Drafts == nil {
+		d.Drafts = migrationDrafts{svc: d.Migrations}
 	}
 	if d.Guard == nil {
 		return nil, errors.New("web: Guard wajib diisi")
@@ -93,15 +99,16 @@ func New(d Deps) (*Server, error) {
 		return nil, err
 	}
 	srv := &Server{
-		logger:    d.Logger,
-		guard:     d.Guard,
-		az:        d.Authz,
-		conns:     d.Connections,
-		admin:     d.Admin,
-		explorer:  d.Explorer,
-		drafts:    d.Drafts,
-		templates: tpl,
-		static:    http.StripPrefix("/static/", http.FileServerFS(staticFS)),
+		logger:     d.Logger,
+		guard:      d.Guard,
+		az:         d.Authz,
+		conns:      d.Connections,
+		admin:      d.Admin,
+		explorer:   d.Explorer,
+		migrations: d.Migrations,
+		drafts:     d.Drafts,
+		templates:  tpl,
+		static:     http.StripPrefix("/static/", http.FileServerFS(staticFS)),
 		nav: []NavItem{
 			{Label: "Database", Path: "/databases"},
 			{Label: "Koneksi", Path: "/admin/connections", AdminOnly: true},
@@ -112,6 +119,9 @@ func New(d Deps) (*Server, error) {
 			NavItem{Label: "Pengguna", Path: "/admin/users", AdminOnly: true},
 			NavItem{Label: "Group", Path: "/admin/groups", AdminOnly: true},
 		)
+	}
+	if d.Migrations != nil {
+		srv.dbTabs = append(srv.dbTabs, DatabaseTab{Label: "Migration", Suffix: "/migrations"}, DatabaseTab{Label: "Riwayat", Suffix: "/history"})
 	}
 	return srv, nil
 }
@@ -141,6 +151,9 @@ func (s *Server) Mount(r chi.Router) {
 		}
 		s.mountExplorer(g)
 		s.mountSchemaDiff(g)
+		if s.migrations != nil {
+			s.mountMigrations(g)
+		}
 	})
 }
 

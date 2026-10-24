@@ -23,6 +23,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbconn"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/explorer"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/httpx"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/migration"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/testutil"
@@ -149,6 +150,11 @@ type env struct {
 
 func newEnv(t *testing.T, withSaver bool) *env {
 	t.Helper()
+	return newEnvWith(t, withSaver, false)
+}
+
+func newEnvWith(t *testing.T, withSaver, withMigrations bool) *env {
+	t.Helper()
 
 	platform := testutil.NewPlatformDB(t)
 	t.Cleanup(platform.Close)
@@ -207,6 +213,14 @@ func newEnv(t *testing.T, withSaver bool) *env {
 	if withSaver {
 		e.saver = &fakeSaver{}
 		deps.Drafts = e.saver
+	}
+	if withMigrations {
+		deps.Migrations = &migration.Service{
+			Repo:    migration.NewRepository(platform),
+			Targets: dbconn.Targets{Registry: registry},
+			Auth:    az,
+			Audit:   audit.New(platform),
+		}
 	}
 	srv, err := web.New(deps)
 	require.NoError(t, err)

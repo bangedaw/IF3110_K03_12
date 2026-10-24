@@ -41,7 +41,7 @@ func concrete(route string) string {
 }
 
 func TestEveryProtectedRouteRedirectsAnonymousUsers(t *testing.T) {
-	e := newEnv(t, true)
+	e := newEnvWith(t, true, true)
 	gets, posts := e.routes(http.MethodGet), e.routes(http.MethodPost)
 	require.GreaterOrEqual(t, len(gets), 15)
 	require.GreaterOrEqual(t, len(posts), 20)
@@ -59,7 +59,7 @@ func TestEveryProtectedRouteRedirectsAnonymousUsers(t *testing.T) {
 }
 
 func TestEveryPostRouteRejectsMissingOrWrongCSRFToken(t *testing.T) {
-	e := newEnv(t, true)
+	e := newEnvWith(t, true, true)
 
 	for _, route := range e.routes(http.MethodPost) {
 		path := concrete(route)
@@ -77,7 +77,7 @@ func TestEveryPostRouteRejectsMissingOrWrongCSRFToken(t *testing.T) {
 }
 
 func TestEveryPostRouteRejectsCrossSiteRequests(t *testing.T) {
-	e := newEnv(t, true)
+	e := newEnvWith(t, true, true)
 	routes := append(e.routes(http.MethodPost), "/login")
 
 	for _, route := range routes {
@@ -94,7 +94,7 @@ func TestEveryPostRouteRejectsCrossSiteRequests(t *testing.T) {
 }
 
 func TestEveryPostRouteAcceptsSameOriginRequests(t *testing.T) {
-	e := newEnv(t, true)
+	e := newEnvWith(t, true, true)
 	form := url.Values{"_csrf": {csrfFor(adminID)}}
 	req := httptest.NewRequest(http.MethodPost, "/logout", strings.NewReader(form.Encode()))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -107,7 +107,7 @@ func TestEveryPostRouteAcceptsSameOriginRequests(t *testing.T) {
 }
 
 func TestNoGetRouteChangesState(t *testing.T) {
-	e := newEnv(t, true)
+	e := newEnvWith(t, true, true)
 	before := e.scalar(`SELECT (SELECT count(*) FROM users)::text || '/' || (SELECT count(*) FROM groups)::text || '/' ||
 		(SELECT count(*) FROM database_connections)::text || '/' || (SELECT count(*) FROM group_database_grants)::text || '/' ||
 		(SELECT count(*) FROM schema_snapshots)::text`)
