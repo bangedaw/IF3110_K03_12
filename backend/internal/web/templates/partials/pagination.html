@@ -1,0 +1,10 @@
+{{define "pagination"}}<div class="pager">
+  <span class="muted">Baris {{.From}}–{{.To}}{{if .Estimate}} · {{.Estimate}}{{end}}</span>
+  <span class="pager-links">
+    {{if .PrevURL}}<a class="btn btn-secondary" href="{{.PrevURL}}" rel="prev">Sebelumnya</a>{{else}}<span class="btn btn-secondary is-disabled" aria-disabled="true">Sebelumnya</span>{{end}}
+    {{if .NextURL}}<a class="btn btn-secondary" href="{{.NextURL}}" rel="next">Berikutnya</a>{{else}}<span class="btn btn-secondary is-disabled" aria-disabled="true">Berikutnya</span>{{end}}
+  </span>
+  <span class="pager-sizes">Per halaman:
+    {{range .Sizes}}{{if .Current}}<strong>{{.Size}}</strong>{{else}}<a href="{{.URL}}">{{.Size}}</a>{{end}} {{end}}
+  </span>
+</div>{{end}}

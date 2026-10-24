@@ -1,0 +1,68 @@
+{{define "title"}}{{.Data.SchemaName}}.{{.Data.Name}}{{end}}
+{{define "content"}}
+{{template "dbheader" .}}
+<div class="layout-split">
+  <aside>{{template "explorer_sidebar" .Data}}</aside>
+  <section>
+    <h2>{{.Data.SchemaName}}.{{.Data.Name}}</h2>
+    <p class="muted">{{if eq .Data.Kind "view"}}View{{else}}Tabel{{end}}{{if .Data.Estimate}} · ≈ {{.Data.Estimate}} baris{{end}}</p>
+    <nav class="tabs" aria-label="Detail tabel">
+      {{range .Data.Tabs}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}
+    </nav>
+
+    {{if eq .Data.Tab "columns"}}
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>Nama</th><th>Tipe</th><th>Nullable</th><th>Default</th></tr></thead>
+      <tbody>
+      {{range .Data.Columns}}<tr>
+        <td class="muted">{{.Ordinal}}</td>
+        <td class="mono"><strong>{{.Name}}</strong></td>
+        <td class="mono">{{.Type}}</td>
+        <td>{{if .Nullable}}ya{{else}}<span class="badge">NOT NULL</span>{{end}}</td>
+        <td class="mono">{{.Default}}{{range .Flags}} <span class="badge">{{.}}</span>{{end}}</td>
+      </tr>{{end}}
+      </tbody>
+    </table>
+    </div>
+    {{end}}
+
+    {{if eq .Data.Tab "constraints"}}
+    {{if .Data.Constraints}}<div class="table-wrap">
+    <table>
+      <thead><tr><th>Nama</th><th>Tipe</th><th>Detail</th></tr></thead>
+      <tbody>
+      {{range .Data.Constraints}}<tr><td class="mono"><strong>{{.Name}}</strong></td><td><span class="badge">{{.Type}}</span></td><td class="mono">{{.Detail}}</td></tr>{{end}}
+      </tbody>
+    </table>
+    </div>{{else}}<p class="empty">Tidak ada constraint.</p>{{end}}
+    {{end}}
+
+    {{if eq .Data.Tab "indexes"}}
+    {{if .Data.Indexes}}<div class="table-wrap">
+    <table>
+      <thead><tr><th>Nama</th><th>Kolom</th><th>Properti</th></tr></thead>
+      <tbody>
+      {{range .Data.Indexes}}<tr><td class="mono"><strong>{{.Name}}</strong></td><td class="mono">{{.Columns}}</td><td>{{range .Flags}}<span class="badge">{{.}}</span> {{end}}</td></tr>{{end}}
+      </tbody>
+    </table>
+    </div>{{else}}<p class="empty">Tidak ada index.</p>{{end}}
+    {{end}}
+
+    {{if eq .Data.Tab "data"}}{{with .Data.Rows}}
+    <div class="table-wrap">
+    <table>
+      <thead><tr>
+        {{range .Columns}}<th scope="col"{{if eq .Dir "asc"}} aria-sort="ascending"{{else if eq .Dir "desc"}} aria-sort="descending"{{end}}><a href="{{.URL}}">{{.Name}}{{if eq .Dir "asc"}} ▲{{else if eq .Dir "desc"}} ▼{{end}}</a></th>{{end}}
+      </tr></thead>
+      <tbody>
+      {{range .Rows}}<tr>{{range .}}<td class="cell">{{if .IsNull}}<span class="null">NULL</span>{{else}}{{.Value}}{{if .Truncated}}…{{end}}{{end}}</td>{{end}}</tr>
+      {{else}}<tr><td colspan="{{len $.Data.Rows.Columns}}" class="muted">Tabel kosong.</td></tr>{{end}}
+      </tbody>
+    </table>
+    </div>
+    {{template "pagination" .}}
+    {{end}}{{end}}
+  </section>
+</div>
+{{end}}

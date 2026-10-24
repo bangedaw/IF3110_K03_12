@@ -1,6 +1,10 @@
 /api/openapi.yaml                         @miguelsinaga @bangedaw @SpicyCoinCracker
 /backend/internal/platformdb/migrations/  @miguelsinaga @bangedaw @SpicyCoinCracker
 /backend/internal/dbms/*.go               @bangedaw @SpicyCoinCracker
+/backend/internal/web/*.go                @miguelsinaga @bangedaw @SpicyCoinCracker
+/backend/internal/web/templates/layout.html   @miguelsinaga @bangedaw @SpicyCoinCracker
+/backend/internal/web/templates/partials/     @miguelsinaga @bangedaw @SpicyCoinCracker
+/backend/internal/web/static/             @miguelsinaga @bangedaw @SpicyCoinCracker
 
 /backend/cmd/                             @miguelsinaga
 /backend/internal/config/                 @miguelsinaga
@@ -10,10 +14,10 @@
 /backend/internal/authz/                  @miguelsinaga
 /backend/internal/admin/                  @miguelsinaga
 /backend/internal/audit/                  @miguelsinaga
-/frontend/src/app/                        @miguelsinaga
-/frontend/src/lib/api/                    @miguelsinaga
-/frontend/src/features/auth/              @miguelsinaga
-/frontend/src/features/admin/             @miguelsinaga
+/backend/internal/web/auth_pages.go      @miguelsinaga
+/backend/internal/web/admin_pages.go     @miguelsinaga
+/backend/internal/web/templates/auth/    @miguelsinaga
+/backend/internal/web/templates/admin/   @miguelsinaga
 /.github/                                 @miguelsinaga
 
 /backend/internal/secret/                 @bangedaw
@@ -22,10 +26,14 @@
 /backend/internal/explorer/               @bangedaw
 /backend/internal/schemadiff/             @bangedaw
 /backend/internal/testutil/               @bangedaw
-/frontend/src/features/connections/       @bangedaw
-/frontend/src/features/explorer/          @bangedaw
-/frontend/src/features/schema-diff/       @bangedaw
+/backend/internal/web/connections_pages.go   @bangedaw
+/backend/internal/web/explorer_pages.go      @bangedaw
+/backend/internal/web/schemadiff_pages.go    @bangedaw
+/backend/internal/web/templates/connections/ @bangedaw
+/backend/internal/web/templates/explorer/    @bangedaw
+/backend/internal/web/templates/schemadiff/  @bangedaw
 /deploy/                                  @bangedaw
 
 /backend/internal/migration/              @SpicyCoinCracker
-/frontend/src/features/migrations/        @SpicyCoinCracker
+/backend/internal/web/migration_pages.go     @SpicyCoinCracker
+/backend/internal/web/templates/migrations/  @SpicyCoinCracker

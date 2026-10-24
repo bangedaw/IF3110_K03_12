@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"testing/fstest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -74,8 +73,7 @@ func TestServerWiring(t *testing.T) {
 			RotationInterval: 15 * time.Minute, GracePeriod: 30 * time.Second, TouchInterval: time.Minute,
 		},
 	}
-	spa := fstest.MapFS{"index.html": {Data: []byte("<div id=root></div>")}}
-	h, cleanup, err := newHandler(cfg, pool, slog.New(slog.NewTextHandler(io.Discard, nil)), spa)
+	h, cleanup, err := newHandler(cfg, pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	require.NoError(t, err)
 	t.Cleanup(cleanup)
 
@@ -87,9 +85,18 @@ func TestServerWiring(t *testing.T) {
 	rec := anon.do(http.MethodGet, "/api/tidak-ada", "")
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
-	rec = anon.do(http.MethodGet, "/databases/1/schemas/app/tables/books", "")
+	rec = anon.do(http.MethodGet, "/login", "")
 	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "<div id=root></div>", rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `action="/login"`)
+	rec = anon.do(http.MethodGet, "/tidak-ada", "")
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Contains(t, rec.Header().Get("Content-Type"), "text/html")
+	assert.Equal(t, http.StatusSeeOther, anon.do(http.MethodGet, "/", "").Code)
+	for _, path := range []string{"/databases", "/databases/1/schemas/app/tables/books", "/admin/connections"} {
+		rec = anon.do(http.MethodGet, path, "")
+		assert.Equal(t, http.StatusSeeOther, rec.Code, path)
+		assert.Contains(t, rec.Header().Get("Location"), "/login?next=", path)
+	}
 
 	alice := &client{t: t, h: h}
 	alice.login("alice")

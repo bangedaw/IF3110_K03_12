@@ -1,0 +1,32 @@
+{{define "title"}}Hasil schema diff{{end}}
+{{define "content"}}
+{{template "dbheader" .}}
+{{$d := .Data}}
+<h2>Hasil perbandingan dengan {{$d.Against}}</h2>
+<p class="muted"><a href="/databases/{{$d.Header.DB.ID}}/diff">Pilih pembanding lain</a></p>
+{{if not $d.Changes}}<p class="empty" role="status">Schema identik. Tidak ada perubahan.</p>
+{{else}}
+<h3>{{len $d.Changes}} perubahan</h3>
+<ul class="change-list" aria-label="Daftar perubahan">
+  {{range $d.Changes}}<li{{if .Destructive}} class="destructive"{{end}}><span>{{.Text}}</span>{{if .Destructive}}<span class="badge badge-danger">destructive</span>{{end}}</li>{{end}}
+</ul>
+{{if $d.Destructive}}<div class="notice notice-danger" role="alert">Ada perubahan destructive yang dapat menghapus data. Rename tidak terdeteksi otomatis dan muncul sebagai drop + add.</div>{{end}}
+{{if $d.Warnings}}<div class="notice notice-warning"><strong>Peringatan</strong><ul>{{range $d.Warnings}}<li>{{.}}</li>{{end}}</ul></div>{{end}}
+
+<form class="card" method="post" action="/databases/{{$d.Header.DB.ID}}/diff/save">
+  {{template "csrf" .}}
+  <div class="field">
+    <label for="sql">SQL migration (dapat diubah)</label>
+    <textarea id="sql" name="sql" class="code" spellcheck="false">{{$d.SQL}}</textarea>
+  </div>
+  <div class="field">
+    <label for="title">Judul draft</label>
+    <input id="title" name="title" type="text" value="{{$d.Title}}" maxlength="200" required>
+  </div>
+  <div class="actions">
+    <button class="btn" type="submit"{{if not $d.CanSave}} disabled{{end}}>Simpan sebagai draft migration</button>
+    {{if $d.SaveNotice}}<span class="muted">{{$d.SaveNotice}}</span>{{end}}
+  </div>
+</form>
+{{end}}
+{{end}}

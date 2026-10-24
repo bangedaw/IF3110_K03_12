@@ -1,0 +1,104 @@
+{{define "title"}}{{if .Data.Editing}}Group {{.Data.Name}}{{else}}Tambah group{{end}}{{end}}
+{{define "content"}}
+{{$d := .Data}}
+<div class="page-head">
+  <div>
+    <h1>{{if $d.Editing}}{{$d.Name}}{{else}}Tambah group{{end}}</h1>
+    <p class="muted"><a href="/admin/groups">Kembali ke daftar group</a></p>
+  </div>
+</div>
+
+<form class="card" method="post" action="{{if $d.Editing}}/admin/groups/{{$d.ID}}{{else}}/admin/groups/new{{end}}" novalidate>
+  {{template "csrf" .}}
+  <div class="form-grid">
+    <div class="field">
+      <label for="name">Nama</label>
+      <input id="name" name="name" type="text" value="{{$d.Name}}" required{{if index $d.Errors "name"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.Errors "name"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    <div class="field">
+      <label for="description">Deskripsi</label>
+      <input id="description" name="description" type="text" value="{{$d.Description}}"{{if index $d.Errors "description"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.Errors "description"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn" type="submit">{{if $d.Editing}}Simpan{{else}}Buat group{{end}}</button>
+    <a class="btn btn-ghost" href="/admin/groups">Batal</a>
+  </div>
+</form>
+
+{{if $d.Editing}}
+<div class="card">
+  <h2>Member</h2>
+  {{if $d.Members}}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Username</th><th>Nama</th><th class="right">Aksi</th></tr></thead>
+    <tbody>
+    {{range $d.Members}}<tr>
+      <td><strong>{{.Username}}</strong></td>
+      <td>{{.DisplayName}}</td>
+      <td class="right"><form class="inline-form" method="post" action="/admin/groups/{{$d.ID}}/members/{{.Id}}/remove">{{template "csrf" $}}<button class="btn btn-secondary btn-sm" type="submit">Keluarkan</button></form></td>
+    </tr>{{end}}
+    </tbody>
+  </table>
+  </div>
+  {{else}}<p class="muted">Belum ada member.</p>{{end}}
+  <form class="actions" method="post" action="/admin/groups/{{$d.ID}}/members">
+    {{template "csrf" .}}
+    <label for="member-user" class="muted">Tambah member</label>
+    <select id="member-user" name="userId">
+      <option value="">Pilih pengguna…</option>
+      {{range $d.Candidates}}<option value="{{.Id}}">{{.Username}}</option>{{end}}
+    </select>
+    <button class="btn" type="submit"{{if not $d.Candidates}} disabled{{end}}>Tambah</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Akses database</h2>
+  {{if $d.Grants}}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Database</th><th>Level</th><th class="right">Aksi</th></tr></thead>
+    <tbody>
+    {{range $d.Grants}}{{$grant := .}}<tr>
+      <td><strong>{{.DatabaseName}}</strong></td>
+      <td>
+        <form class="actions" method="post" action="/admin/groups/{{$d.ID}}/grants">
+          {{template "csrf" $}}
+          <input type="hidden" name="databaseId" value="{{.DatabaseID}}">
+          <select name="level" aria-label="Level akses {{.DatabaseName}}">
+            {{range $d.Levels}}<option value="{{.Level}}"{{if eq .Level $grant.Level}} selected{{end}}>{{.Label}}</option>{{end}}
+          </select>
+          <button class="btn btn-secondary btn-sm" type="submit">Simpan</button>
+        </form>
+      </td>
+      <td class="right"><form class="inline-form" method="post" action="/admin/groups/{{$d.ID}}/grants/{{.DatabaseID}}/remove">{{template "csrf" $}}<button class="btn btn-secondary btn-sm" type="submit">Cabut</button></form></td>
+    </tr>{{end}}
+    </tbody>
+  </table>
+  </div>
+  {{else}}<p class="muted">Group ini belum punya akses ke database mana pun.</p>{{end}}
+  <form class="actions" method="post" action="/admin/groups/{{$d.ID}}/grants">
+    {{template "csrf" .}}
+    <label for="grant-db" class="muted">Beri akses</label>
+    <select id="grant-db" name="databaseId">
+      <option value="">Pilih database…</option>
+      {{range $d.AvailableDBs}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+    </select>
+    <select name="level" aria-label="Level akses">
+      {{range $d.Levels}}<option value="{{.Level}}">{{.Label}}</option>{{end}}
+    </select>
+    <button class="btn" type="submit"{{if not $d.AvailableDBs}} disabled{{end}}>Beri akses</button>
+  </form>
+  <p class="hint muted">Jika pengguna berada di beberapa group pada database yang sama, level tertinggi yang berlaku.</p>
+</div>
+
+<div class="card">
+  <h2>Hapus group</h2>
+  <a class="btn btn-danger" href="/admin/groups/{{$d.ID}}/delete">Hapus group</a>
+</div>
+{{end}}
+{{end}}

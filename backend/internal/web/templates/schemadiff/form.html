@@ -1,0 +1,38 @@
+{{define "title"}}Schema diff{{end}}
+{{define "content"}}
+{{template "dbheader" .}}
+<h2>Schema diff</h2>
+<p class="muted">Bandingkan <strong>{{.Data.Header.DB.Name}}</strong> dengan pembanding, lalu hasilkan SQL yang membuat <strong>{{.Data.Header.DB.Name}}</strong> menyamai pembanding. SQL hanya kandidat: tinjau dan ubah sebelum disimpan.</p>
+{{if .Data.Error}}<div class="notice notice-danger" role="alert">{{.Data.Error}}</div>{{end}}
+
+<form class="card" method="post" action="/databases/{{.Data.Header.DB.ID}}/diff">
+  {{template "csrf" .}}
+  <input type="hidden" name="source" value="database">
+  <div class="field">
+    <label for="against-db">Bandingkan dengan database lain</label>
+    <select id="against-db" name="against">
+      <option value="">Pilih…</option>
+      {{range .Data.Databases}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+    </select>
+    {{if not .Data.Databases}}<span class="hint">Tidak ada database lain berjenis sama yang dapat Anda lihat.</span>{{end}}
+  </div>
+  <p><button class="btn" type="submit"{{if not .Data.Databases}} disabled{{end}}>Bandingkan dengan database</button></p>
+</form>
+
+<form class="card" method="post" action="/databases/{{.Data.Header.DB.ID}}/diff">
+  {{template "csrf" .}}
+  <input type="hidden" name="source" value="snapshot">
+  <div class="field">
+    <label for="against-snap">Bandingkan dengan snapshot</label>
+    <select id="against-snap" name="against">
+      <option value="">Pilih…</option>
+      {{range .Data.Snapshots}}<option value="{{.ID}}">{{.Label}}</option>{{end}}
+    </select>
+    {{if not .Data.Snapshots}}<span class="hint">Belum ada snapshot. Ambil snapshot untuk menyimpan kondisi schema saat ini.</span>{{end}}
+  </div>
+  <div class="actions">
+    <button class="btn" type="submit"{{if not .Data.Snapshots}} disabled{{end}}>Bandingkan dengan snapshot</button>
+    <button class="btn btn-secondary" type="submit" formaction="/databases/{{.Data.Header.DB.ID}}/snapshots">Ambil snapshot sekarang</button>
+  </div>
+</form>
+{{end}}
