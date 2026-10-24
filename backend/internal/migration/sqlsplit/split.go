@@ -139,7 +139,7 @@ func Split(script string, dialect Dialect) ([]Statement, error) {
 			}
 		}
 		if c == ';' {
-			if s := strings.TrimSpace(script[start:i]); s != "" {
+			if s := strings.TrimSpace(script[start:i]); s != "" && !commentOnly(s) {
 				out = append(out, Statement{Index: len(out) + 1, SQL: s})
 			}
 			start = i + 1
@@ -149,7 +149,7 @@ func Split(script string, dialect Dialect) ([]Statement, error) {
 	if single || double || backtick || dollarTag != "" || blockDepth > 0 {
 		return nil, fmt.Errorf("unterminated quoted string, identifier, dollar-quote, or block comment")
 	}
-	if s := strings.TrimSpace(script[start:]); s != "" {
+	if s := strings.TrimSpace(script[start:]); s != "" && !commentOnly(s) {
 		out = append(out, Statement{Index: len(out) + 1, SQL: s})
 	}
 	return out, nil
@@ -172,6 +172,9 @@ func readDollarTag(s string) (string, bool) {
 }
 
 func Validate(stmts []Statement, dialect Dialect) error {
+	if len(stmts) == 0 {
+		return &ValidationError{Message: "script tidak berisi statement SQL"}
+	}
 	for _, st := range stmts {
 		normalized := strings.ToUpper(strings.TrimSpace(stripLeadingComments(st.SQL)))
 		fields := strings.Fields(normalized)
@@ -202,6 +205,10 @@ func containsSequence(fields []string, a, b string) bool {
 		}
 	}
 	return false
+}
+
+func commentOnly(s string) bool {
+	return stripLeadingComments(s) == ""
 }
 
 func stripLeadingComments(s string) string {

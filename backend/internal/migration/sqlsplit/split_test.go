@@ -52,3 +52,43 @@ func TestValidateAllowsFunctionBody(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSplitDropsCommentOnlyChunks(t *testing.T) {
+	cases := map[string]int{
+		"-- hanya komentar":                           0,
+		"/* blok */":                                  0,
+		"  \n-- a\n/* b */\n":                         0,
+		"SELECT 1; -- selesai":                        1,
+		"SELECT 1;\n-- tengah\n;\nSELECT 2;":          2,
+		"-- awal\nSELECT 1;":                          1,
+		"SELECT 1 -- komentar akhir baris\n;":         1,
+		"/* a */ SELECT 1; /* b */ SELECT 2; /* c */": 2,
+	}
+	for script, want := range cases {
+		got, err := Split(script, PostgreSQL)
+		if err != nil {
+			t.Fatalf("%q: %v", script, err)
+		}
+		if len(got) != want {
+			t.Errorf("%q: want %d statements, got %d: %#v", script, want, len(got), got)
+		}
+		for i, st := range got {
+			if st.Index != i+1 {
+				t.Errorf("%q: index statement %d = %d", script, i, st.Index)
+			}
+		}
+	}
+}
+
+func TestValidateRejectsScriptWithoutStatements(t *testing.T) {
+	stmts, err := Split("-- kosong\n/* tetap kosong */", PostgreSQL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Validate(stmts, PostgreSQL); err == nil {
+		t.Fatal("script tanpa statement harus ditolak")
+	}
+	if err := Validate(nil, MySQL); err == nil {
+		t.Fatal("daftar statement kosong harus ditolak")
+	}
+}
