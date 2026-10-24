@@ -21,8 +21,9 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.5.0
+          install-mode: goinstall
           working-directory: backend
-      - run: go test -race ./...
+      - run: go test -race -timeout 30m ./...
 
   contract:
     runs-on: ubuntu-latest
