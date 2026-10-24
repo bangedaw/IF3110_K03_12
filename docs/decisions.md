@@ -159,6 +159,7 @@ karena level dihitung ulang setiap kali (tanpa cache).
 - Statement pengendali transaksi (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`) dan statement yang tidak
   boleh berada dalam transaction PostgreSQL (`VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`)
   ditolak saat draft disimpan (422).
+- Script yang kosong atau hanya berisi komentar/spasi ditolak (422) karena tidak ada statement yang dijalankan.
 - Database target menyimpan tabel `_dbmp_schema_history` yang ditulis dalam transaction yang sama dengan
   perubahan migration. Saat server start (sebelum menerima request), *reconciler* memeriksa run yang masih
   berstatus `running` dari proses sebelumnya: bila tercatat di `_dbmp_schema_history`, run ditandai

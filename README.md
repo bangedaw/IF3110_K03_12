@@ -41,6 +41,24 @@ jadi pakai `localhost`):
 Lalu buat user dan group di menu **Pengguna** / **Group**, dan beri group akses View Only atau View + Edit
 per database. Platform Admin sendiri tidak otomatis punya akses data; tambahkan ke group bila perlu.
 
+### Data demo
+
+Untuk mengisi skenario demo sekaligus (hanya untuk development, ditolak bila `APP_ENV=production`):
+
+```bash
+cd backend && go run ./cmd/dbmpctl seed-demo            # opsional: -password <sandi> -host <host>
+```
+
+Perintah ini idempotent dan membuat akun berikut dengan password `demo12345`, tiga koneksi di atas,
+serta dua group (`backend-team`: alice, carol; `analyst`: bob, carol):
+
+| User | Akses efektif |
+|---|---|
+| admin | tidak punya akses data (hanya kelola pengguna, group, koneksi) |
+| alice | inventory View + Edit, inventory-staging View Only |
+| bob | inventory View Only, sales View Only |
+| carol | inventory View + Edit, inventory-staging View Only, sales View Only |
+
 ## Build satu binary (demo/production)
 
 ```bash
