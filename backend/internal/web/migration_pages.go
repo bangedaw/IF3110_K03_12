@@ -80,6 +80,7 @@ type explainRow struct {
 	Explainable bool
 	Notice      string
 	Plan        string
+	Tree        *planView
 }
 
 type migrationExplainView struct {
@@ -364,6 +365,7 @@ func (s *Server) migrationExplain(w http.ResponseWriter, r *http.Request) {
 		for _, st := range er.Statements {
 			row := explainRow{Index: st.Index, SQL: st.SQL, Explainable: st.Explainable, Notice: st.Notice}
 			if st.Plan != nil {
+				row.Tree = buildPlan(st.Plan)
 				if raw, err := json.MarshalIndent(st.Plan, "", "  "); err == nil {
 					row.Plan = string(raw)
 				}

@@ -155,6 +155,9 @@ func TestMigrationExplainShowsPlanWithoutChangingData(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code, body(rec))
 	assert.Contains(t, body(rec), "Node Type")
 	assert.Contains(t, body(rec), "Actual Total Time")
+	assert.Contains(t, body(rec), "ModifyTable (Delete)")
+	assert.Contains(t, body(rec), "node termahal")
+	assert.Contains(t, body(rec), "pada app.books")
 
 	var n int
 	require.NoError(t, e.target.QueryRow(context.Background(), `SELECT count(*) FROM app.books`).Scan(&n))

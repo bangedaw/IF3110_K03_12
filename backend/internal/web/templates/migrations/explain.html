@@ -1,4 +1,10 @@
 {{define "title"}}EXPLAIN · {{.Data.M.Title}}{{end}}
+{{define "plan_node"}}<li>
+  <strong>{{.Type}}</strong>{{if .Costliest}} <span class="badge badge-danger">node termahal</span>{{end}}{{if .SeqScan}} <span class="badge badge-warning">Seq Scan pada tabel besar</span>{{end}}
+  {{with .Detail}}<div class="muted">{{.}}</div>{{end}}
+  <div class="mono">cost {{.Cost}} · {{.Rows}}{{with .Time}} · {{.}}{{end}}</div>
+  {{if .Children}}<ul>{{range .Children}}{{template "plan_node" .}}{{end}}</ul>{{end}}
+</li>{{end}}
 {{define "content"}}
 {{$d := .Data}}
 {{template "dbheader" .}}
@@ -17,7 +23,8 @@
   <h3>Statement {{.Index}}</h3>
   <pre class="mig-sql">{{.SQL}}</pre>
   {{if .Notice}}<p class="muted">{{.Notice}}</p>{{end}}
-  {{if .Plan}}<pre class="mig-sql">{{.Plan}}</pre>{{else if not .Explainable}}<p class="muted">Statement ini tidak dapat di-EXPLAIN.</p>{{end}}
+  {{with .Tree}}{{with .Summary}}<p class="muted">{{.}}</p>{{end}}<ul class="mig-plan">{{template "plan_node" .Root}}</ul>{{end}}
+  {{if .Plan}}<details{{if not .Tree}} open{{end}}><summary>Plan JSON</summary><pre class="mig-sql">{{.Plan}}</pre></details>{{else if not .Explainable}}<p class="muted">Statement ini tidak dapat di-EXPLAIN.</p>{{end}}
 </div>
 {{else}}{{if $d.Ran}}{{if not $d.Error}}<p class="empty">Tidak ada statement.</p>{{end}}{{end}}{{end}}
 {{end}}

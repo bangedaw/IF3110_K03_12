@@ -30,12 +30,12 @@ func (e Explainer) Explain(ctx context.Context, in dbms.ExplainInput) (*dbms.Exp
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 	timeout := in.StatementTimeout
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -53,7 +53,7 @@ func (e Explainer) Explain(ctx context.Context, in dbms.ExplainInput) (*dbms.Exp
 			if _, err = tx.Exec(ctx, st.SQL); err != nil {
 				return nil, fmt.Errorf("statement %d (context DDL): %w", st.Index, err)
 			}
-			item.Notice = "DDL executed only to establish context; not explainable"
+			item.Notice = "DDL dijalankan sebagai konteks untuk statement berikutnya lalu di-rollback; tidak dapat di-EXPLAIN"
 			result.Statements = append(result.Statements, item)
 			continue
 		}

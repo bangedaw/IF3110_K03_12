@@ -136,3 +136,6 @@ h3 { font-size: 1rem; margin: 1rem 0 .5rem; }
 .auth-card { max-width: 24rem; margin: 3rem auto; }
 
 .mig-sql { white-space: pre-wrap; word-break: break-word; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem; margin: .5rem 0; font-size: .85rem; }
+.badge-warning { background: var(--warning-bg); color: var(--warning); border-color: #fedf89; }
+.mig-plan, .mig-plan ul { list-style: none; padding-left: 1.25rem; border-left: 2px solid var(--border); margin: .25rem 0; }
+.mig-plan li { margin: .4rem 0; }
