@@ -1,11 +1,15 @@
 package auth
 
 import (
+	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
 )
 
@@ -46,5 +50,37 @@ func (s *Service) WebLogout(w http.ResponseWriter, r *http.Request, id WebIdenti
 		return err
 	}
 	s.clearCookie(w)
+	return nil
+}
+
+func (s *Service) WebLogin(w http.ResponseWriter, r *http.Request, username, password string) error {
+	username = strings.TrimSpace(username)
+	fields := map[string]string{}
+	if username == "" {
+		fields["username"] = "wajib diisi"
+	}
+	if password == "" {
+		fields["password"] = "wajib diisi"
+	}
+	if len(fields) > 0 {
+		return apperr.Validation(fields)
+	}
+	user, sess, err := s.Login(r.Context(), LoginInput{
+		Username:  username,
+		Password:  password,
+		UserAgent: r.UserAgent(),
+		IP:        clientIP(r),
+	})
+	entry := audit.Entry{Action: "auth.login", ResourceType: "user", Outcome: audit.OutcomeSuccess, Metadata: map[string]any{"username": username}}
+	if err != nil {
+		if errors.Is(err, errInvalidCredentials) {
+			entry.Outcome = audit.OutcomeFailure
+			s.audit.Record(r.Context(), entry)
+		}
+		return err
+	}
+	entry.ActorID, entry.ResourceID = user.ID, strconv.FormatInt(user.ID, 10)
+	s.audit.Record(r.Context(), entry)
+	s.setCookie(w, sess.NewToken, sess.ExpiresAt)
 	return nil
 }

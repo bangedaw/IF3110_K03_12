@@ -89,3 +89,83 @@ func TestWebLogoutRevokesSession(t *testing.T) {
 	_, err = svc.WebAuthenticate(w, r)
 	require.Error(t, err)
 }
+
+func TestWebLoginSetsSessionCookie(t *testing.T) {
+	svc, pool, _ := newTestService(t)
+	createUser(t, pool, "alice", "rahasia123", true)
+
+	w, r := authRequest(nil)
+	err := svc.WebLogin(w, r, "  alice ", "rahasia123")
+
+	require.NoError(t, err)
+	cookie := sessionCookie(t, w)
+	require.NotNil(t, cookie)
+	assert.True(t, cookie.HttpOnly)
+	assert.Equal(t, http.SameSiteLaxMode, cookie.SameSite)
+	w2, r2 := authRequest(cookie)
+	id, err := svc.WebAuthenticate(w2, r2)
+	require.NoError(t, err)
+	assert.Equal(t, "alice", id.Username)
+}
+
+func TestWebLoginRejectsBadCredentialsWithoutCookie(t *testing.T) {
+	svc, pool, _ := newTestService(t)
+	createUser(t, pool, "alice", "rahasia123", true)
+	createUser(t, pool, "nonaktif", "rahasia123", false)
+
+	cases := map[string][2]string{
+		"password salah": {"alice", "salah"},
+		"user tidak ada": {"hantu", "rahasia123"},
+		"user nonaktif":  {"nonaktif", "rahasia123"},
+	}
+	var messages []string
+	for name, c := range cases {
+		w, r := authRequest(nil)
+		err := svc.WebLogin(w, r, c[0], c[1])
+		require.ErrorIs(t, err, apperr.ErrUnauthenticated, name)
+		assert.Nil(t, sessionCookie(t, w), name)
+		messages = append(messages, err.Error())
+	}
+	assert.Len(t, messages, 3)
+	assert.Equal(t, messages[0], messages[1])
+	assert.Equal(t, messages[1], messages[2])
+}
+
+func TestWebLoginValidatesRequiredFields(t *testing.T) {
+	svc, _, _ := newTestService(t)
+
+	w, r := authRequest(nil)
+	err := svc.WebLogin(w, r, "   ", "")
+
+	var ae *apperr.Error
+	require.ErrorAs(t, err, &ae)
+	assert.Equal(t, apperr.CodeValidation, ae.Code)
+	assert.Contains(t, ae.Fields, "username")
+	assert.Contains(t, ae.Fields, "password")
+}
+
+func TestWebLoginRecordsAuditEntries(t *testing.T) {
+	svc, pool, _ := newTestService(t)
+	createUser(t, pool, "alice", "rahasia123", true)
+
+	w, r := authRequest(nil)
+	require.Error(t, svc.WebLogin(w, r, "alice", "salah"))
+	w, r = authRequest(nil)
+	require.NoError(t, svc.WebLogin(w, r, "alice", "rahasia123"))
+
+	rows, err := pool.Query(r.Context(), `SELECT outcome, metadata::text FROM audit_logs WHERE action = 'auth.login' ORDER BY id`)
+	require.NoError(t, err)
+	defer rows.Close()
+	var outcomes, metadata []string
+	for rows.Next() {
+		var outcome, meta string
+		require.NoError(t, rows.Scan(&outcome, &meta))
+		outcomes = append(outcomes, outcome)
+		metadata = append(metadata, meta)
+	}
+	assert.Equal(t, []string{"failure", "success"}, outcomes)
+	for _, m := range metadata {
+		assert.NotContains(t, m, "rahasia123")
+		assert.NotContains(t, m, "salah")
+	}
+}
