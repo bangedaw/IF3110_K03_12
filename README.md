@@ -1,15 +1,16 @@
 # IF3110_K03_12 — Database Management Platform
 
 Platform untuk mengatur akses ke database bersama, menjelajahi schema dan data, serta menjalankan
-migration secara terkontrol. Backend Go (modular monolith) + frontend React SPA.
+migration secara terkontrol. Backend Go (modular monolith) dengan tampilan **server-rendered**
+(`html/template`, tanpa SPA).
 
 - Keputusan desain (session, CSRF, akses multi-group, Platform Admin, dll.): [docs/decisions.md](docs/decisions.md)
 - Arsitektur dan pembagian paket: [docs/architecture.md](docs/architecture.md)
-- Kontrak API: [api/openapi.yaml](api/openapi.yaml)
+- Kontrak JSON API: [api/openapi.yaml](api/openapi.yaml)
 
 ## Prasyarat
 
-- Go ≥ 1.25, Node.js ≥ 22, Docker
+- Go ≥ 1.25, Docker
 - GNU make (Windows: jalankan dari Git Bash; `winget install ezwinports.make`)
 - gcc/cgo hanya untuk `make gen` (sqlc dijalankan via `go run`)
 
@@ -18,15 +19,17 @@ migration secara terkontrol. Backend Go (modular monolith) + frontend React SPA.
 ```bash
 cp .env.example .env
 make dev                                   # platform DB + target PostgreSQL ×2 + MySQL, dengan data seed
-make run                                   # backend di :8080 (migration platform DB otomatis)
+make run                                   # server di :8080 (migration platform DB otomatis)
 cd backend && go run ./cmd/dbmpctl create-admin -username admin   # sekali saja
-cd frontend && npm ci && npm run dev       # buka http://localhost:5173
 ```
+
+Buka http://localhost:8080 dan masuk sebagai admin. Dengan `APP_ENV=dev`, template dibaca langsung dari
+`backend/internal/web/templates` sehingga perubahan terlihat tanpa menjalankan ulang server.
 
 `create-admin` meminta password tanpa menampilkannya (atau membaca stdin bila di-pipe). Menjalankan ulang
 untuk username yang sama akan mereset password, mengaktifkan akun, dan me-revoke semua session-nya.
 
-Setelah login sebagai admin, daftarkan database target di menu **Koneksi** (backend berjalan di host,
+Setelah login sebagai admin, daftarkan database target di menu **Koneksi** (server berjalan di host,
 jadi pakai `localhost`):
 
 | Nama | DBMS | Port | Database | User / password |
@@ -35,14 +38,14 @@ jadi pakai `localhost`):
 | inventory-staging | PostgreSQL | 5434 | `inventory` | `dbmp` / `dbmp` |
 | sales | MySQL | 3307 | `sales` | `dbmp` / `dbmp` |
 
-Lalu buat user dan group di menu **Users** / **Groups**, dan beri group akses View Only atau View + Edit
+Lalu buat user dan group di menu **Pengguna** / **Group**, dan beri group akses View Only atau View + Edit
 per database. Platform Admin sendiri tidak otomatis punya akses data; tambahkan ke group bila perlu.
 
 ## Build satu binary (demo/production)
 
 ```bash
-make build        # build SPA, embed ke binary → bin/dbmp dan bin/dbmpctl
-./bin/dbmp        # SPA + API di :8080
+make build        # template dan aset statis di-embed → bin/dbmp dan bin/dbmpctl
+./bin/dbmp        # halaman web + JSON API di :8080
 ```
 
 Di production set `APP_ENV=production` (cookie `Secure`, wajib di belakang HTTPS) dan ganti
@@ -52,7 +55,7 @@ Di production set `APP_ENV=production` (cookie `Secure`, wajib di belakang HTTPS
 
 | Env var | Default | Keterangan |
 |---|---|---|
-| `APP_ENV` | `dev` | `production` mengaktifkan cookie `Secure` |
+| `APP_ENV` | `dev` | `production` mengaktifkan cookie `Secure`; `dev` membaca template dari disk |
 | `HTTP_ADDR` | `:8080` | alamat listen |
 | `DATABASE_URL` | — (wajib) | platform DB |
 | `DBMP_SECRET_KEY` | — (wajib) | 32 byte base64, enkripsi password database target |
@@ -68,8 +71,8 @@ Untuk demo session, perpendek misalnya `SESSION_IDLE_TIMEOUT=1m SESSION_ROTATION
 ## Test & lint
 
 ```bash
-make test                       # backend: unit + integration (butuh Docker untuk testcontainers)
-cd frontend && npm test         # frontend: Vitest + MSW
+make test                       # unit + integration, termasuk halaman web (butuh Docker untuk testcontainers)
+make test-race
 make lint
 ```
 
@@ -86,7 +89,7 @@ docker rm -f $(docker ps -aq --filter label=org.testcontainers=true)
 Setelah mengubah `api/openapi.yaml` atau `backend/internal/platformdb/queries/*.sql`:
 
 ```bash
-make gen          # sqlc + oapi-codegen + openapi-typescript
+make gen          # sqlc + oapi-codegen
 ```
 
 Hasil generate di-commit; CI gagal jika tidak up to date.

@@ -1,20 +1,23 @@
 # Arsitektur
 
-Database Management Platform adalah **modular monolith**: satu binary Go yang menyajikan JSON API di
-`/api` dan SPA React di `/`, dengan satu PostgreSQL sebagai *platform DB* (user, session, grant, koneksi,
-riwayat migration, audit). Database yang dikelola user disebut *database target*.
+Database Management Platform adalah **modular monolith**: satu binary Go yang menyajikan halaman HTML
+server-rendered (`html/template`) di `/` dan JSON API di `/api`, dengan satu PostgreSQL sebagai
+*platform DB* (user, session, grant, koneksi, riwayat migration, audit). Database yang dikelola user
+disebut *database target*. Tidak ada SPA: setiap navigasi memuat halaman penuh dari server dan setiap
+aksi adalah form POST yang diakhiri redirect.
 
 ```mermaid
 flowchart LR
-    Browser[React SPA] -->|JSON + cookie dbmp_session| MW
+    Browser[Browser<br/>HTML + form] -->|GET/POST + cookie dbmp_session| MW
     subgraph Server["Go server (satu binary)"]
         MW[RequestID · Logger · Recover · CrossOriginProtection]
+        MW --> WEB[web<br/>halaman HTML + template]
         MW --> AUTH[auth<br/>login · session · CSRF]
-        MW --> SPA[web<br/>SPA ter-embed]
-        AUTH --> ADMIN[admin]
-        AUTH --> DBCONN[dbconn]
-        AUTH --> EXPL[explorer + schema diff]
-        AUTH --> MIG[migration]
+        WEB --> AUTH
+        WEB --> ADMIN[admin]
+        WEB --> DBCONN[dbconn]
+        WEB --> EXPL[explorer + schema diff]
+        WEB --> MIG[migration]
         ADMIN & DBCONN & EXPL & MIG --> AUTHZ[authz<br/>policy terpusat]
         AUTHZ --> AUDIT[audit]
         EXPL & MIG --> REG[dbconn.Registry] --> DBMS[dbms<br/>postgres · mysql]
@@ -23,22 +26,25 @@ flowchart LR
     DBMS --> T[(Database target)]
 ```
 
-## Alur request terlindungi
+## Alur request halaman terlindungi
 
 1. Middleware umum (`httpx.NewRouter`): request ID, logger yang tidak mencatat query/body/cookie,
-   recover panic → 500 Problem Details, dan `http.CrossOriginProtection`.
-2. `auth.Middleware`: membaca cookie, memvalidasi session (revoke, idle, absolute, grace), merotasi bila
-   perlu, memeriksa `X-CSRF-Token` untuk method non-GET, lalu menaruh `authz.Principal` di context.
-3. Handler domain: parsing input, memanggil service.
+   recover panic dan `http.CrossOriginProtection`.
+2. `web.Server.protect`: memanggil `auth.Service.WebAuthenticate` (cookie, validasi session, rotasi), lalu
+   menaruh `authz.Principal` di context. Tanpa session valid, request GET diarahkan (303) ke
+   `/login?next=...`. Untuk method non-GET, field form `_csrf` dibandingkan constant-time dengan token
+   HMAC milik family session.
+3. Handler halaman (`internal/web/*_pages.go`): membaca query dan form, memanggil service domain.
 4. Service domain: memanggil `authz.Authorizer.Authorize(principal, aksi, database)` lalu menjalankan
    logika bisnis. Penolakan otomatis tercatat di audit log.
-5. Error dikembalikan sebagai `apperr.Error` dan dipetakan sekali di `httpx.Error` menjadi status HTTP +
-   Problem Details.
+5. Hasil dirender dengan `Render` (template), atau `Redirect` (303 + flash) setelah mutasi. Error dipetakan
+   `Fail` menjadi halaman error (403, 404, 409, 422, 503, 500). JSON API di `/api/*` memakai
+   `auth.Middleware` dan Problem Details seperti sebelumnya.
 
 ## Layering
 
 ```
-handler (HTTP)  →  service (logika + authz)  →  sqlc queries / dbms driver
+handler (halaman HTML / JSON)  →  service (logika + authz)  →  sqlc queries / dbms driver
 ```
 
 - Handler tidak berisi SQL; service tidak tahu soal HTTP.
@@ -59,31 +65,81 @@ handler (HTTP)  →  service (logika + authz)  →  sqlc queries / dbms driver
 | `internal/authz` | daftar aksi, policy, level efektif multi-group | Miguel |
 | `internal/admin` | API user, group, anggota, grant | Miguel |
 | `internal/audit` | audit log + pencatat penolakan authz | Miguel |
-| `internal/web` | penyaji SPA ter-embed dengan fallback ke `index.html` | Miguel |
+| `internal/web` | lapisan halaman: server, render, flash, CSRF form, template, CSS; halaman login, admin, koneksi, explorer, schema diff | Miguel, Edo |
 | `internal/secret` | AES-256-GCM untuk password database target | Edo |
 | `internal/dbms` | interface driver + implementasi PostgreSQL dan MySQL | Edo, Rhino |
 | `internal/dbconn` | CRUD koneksi, test koneksi, registry pool per database | Edo |
 | `internal/schema`, `internal/explorer`, `internal/schemadiff` | introspeksi, viewer, snapshot, diff | Edo |
 | `internal/migration` | draft, eksekusi transaksional, riwayat, EXPLAIN | Rhino |
-| `frontend/src/app`, `features/auth`, `features/admin`, `lib/api` | shell, login, halaman admin, interceptor CSRF/401 | Miguel |
-| `frontend/src/features/{connections,explorer,schema-diff}` | halaman koneksi dan explorer | Edo |
-| `frontend/src/migrations` | halaman migration | Rhino |
+| `internal/web` (halaman migration) | `migration_pages.go` dan `templates/migrations` | Rhino |
 
-## Frontend
+## Lapisan web
 
-- React Router dengan `ProtectedRoute` (wajib login) dan `AdminRoute` (wajib Platform Admin, hanya untuk
-  UX; backend tetap memeriksa).
-- TanStack Query untuk server state; tipe request/response di-generate dari OpenAPI (`openapi-typescript`).
-- Interceptor `fetch` (`lib/api/session.ts`) menambahkan `X-CSRF-Token` ke semua request yang mengubah
-  state ke origin sendiri, dan mengarahkan ke halaman login saat API membalas 401.
+- `web.Server` menyediakan `Render`, `Redirect` (303 + flash cookie sekali-baca), `Fail` (pemetaan error
+  ke halaman), `AddNav` dan `AddDatabaseTab` agar setiap domain mendaftarkan menunya sendiri.
+- Template `html/template` di `internal/web/templates` (satu `layout.html`, partial bersama, satu
+  direktori per domain). Escaping otomatis; tidak ada `template.HTML` pada data pengguna.
+- Semua mutasi memakai `POST` dengan pola Post/Redirect/Get; validasi gagal menampilkan form yang sama
+  dengan status 422. Aksi destruktif memakai halaman konfirmasi.
+- Header keamanan pada setiap halaman: `Content-Security-Policy: default-src 'self'`, `nosniff`,
+  `Cache-Control: no-store`. Tidak ada JavaScript.
+- Menyembunyikan tombol di template hanya kenyamanan; service tetap memeriksa hak akses.
+
+### Menambah halaman baru
+
+Contoh (di dalam paket `internal/web`, mengikuti `connections_pages.go`):
+
+```go
+func (s *Server) mountReports(r chi.Router) {
+	r.Get("/reports", s.reportList)
+	r.Post("/reports/new", s.reportCreate)
+}
+
+func (s *Server) reportList(w http.ResponseWriter, r *http.Request) {
+	p, err := s.authorizeAction(r, authz.ActionManageGroups)
+	if err != nil {
+		s.Fail(w, r, err)
+		return
+	}
+	items, err := s.reports.List(r.Context(), p)
+	if err != nil {
+		s.Fail(w, r, err)
+		return
+	}
+	s.Render(w, r, http.StatusOK, "reports/list", reportsView{Items: items})
+}
+```
+
+Template `templates/reports/list.html` mendefinisikan `title` dan `content`; form selalu menyertakan
+`{{template "csrf" .}}`:
+
+```html
+{{define "title"}}Laporan{{end}}
+{{define "content"}}
+<form method="post" action="/reports/new">{{template "csrf" .}}<button class="btn" type="submit">Buat</button></form>
+{{end}}
+```
+
+Tes memakai fixture `newEnv` (`pages_setup_test.go`) dan `fakeGuard`; tes `route_contract_test.go`
+otomatis memeriksa rute baru (wajib login, wajib `_csrf` pada POST, menolak request lintas situs):
+
+```go
+func TestReportListRejectsNonAdmin(t *testing.T) {
+	e := newEnv(t, false)
+	assert.Equal(t, http.StatusForbidden, e.get("/reports", viewerID).Code)
+}
+```
+
+Daftarkan menu dengan `AddNav(NavItem{Label: "Laporan", Path: "/reports", AdminOnly: true})`, panggil
+`mountReports` di dalam `Mount`, dan setiap mutasi harus `POST` yang diakhiri `Redirect` (303).
 
 ## Build dan deploy
 
-- **Dev:** `make dev` (container DB) + `make run` (backend :8080) + `npm run dev` di `frontend/`
-  (Vite :5173, mem-proxy `/api` ke :8080). Browser hanya melihat satu origin.
-- **Demo/production:** `make build` mem-build SPA, menyalinnya ke `backend/internal/web/dist`, lalu
-  membuat `bin/dbmp` yang menyajikan SPA dan API dari satu port. Set `APP_ENV=production` di belakang
-  HTTPS agar cookie memakai `Secure`.
+- **Dev:** `make dev` (container DB) + `make run` (server :8080). Dengan `APP_ENV=dev` template dibaca dari
+  disk sehingga perubahan terlihat tanpa menjalankan ulang server.
+- **Demo/production:** `make build` membuat `bin/dbmp` dengan template dan aset statis ter-embed
+  (`embed.FS`); satu port, satu origin. Set `APP_ENV=production` di belakang HTTPS agar cookie memakai
+  `Secure`.
 
 ## Testing
 
@@ -91,4 +147,5 @@ handler (HTTP)  →  service (logika + authz)  →  sqlc queries / dbms driver
 - Integration test memanggil handler/service dengan PostgreSQL/MySQL sungguhan lewat testcontainers;
   waktu session dikendalikan lewat clock yang di-inject sehingga idle, absolute, rotasi, dan grace bisa
   diuji tanpa menunggu.
-- Frontend: Vitest + Testing Library + MSW.
+- Halaman: `httptest` terhadap router penuh (status, redirect, cookie, isi HTML, penolakan akses, CSRF) dengan
+  fixture testcontainers; alur login → admin → explorer → logout diuji dengan session asli di `cmd/server`.
