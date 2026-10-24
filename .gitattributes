@@ -1,0 +1,1 @@
+backend/internal/schemadiff/testdata/*.sql text eol=lf
