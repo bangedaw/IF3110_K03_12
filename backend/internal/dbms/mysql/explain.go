@@ -39,7 +39,7 @@ func (e Explainer) Explain(ctx context.Context, in dbms.ExplainInput) (*dbms.Exp
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	timeout := in.StatementTimeout
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -52,10 +52,7 @@ func (e Explainer) Explain(ctx context.Context, in dbms.ExplainInput) (*dbms.Exp
 		ok := mysqlExplainable(k)
 		item := dbms.ExplainStatement{Index: s.Index, SQL: s.SQL, Explainable: ok}
 		if !ok {
-			if _, err = tx.ExecContext(ctx, s.SQL); err != nil {
-				return nil, fmt.Errorf("statement %d (context DDL): %w", s.Index, err)
-			}
-			item.Notice = "DDL executed only to establish context; not explainable"
+			item.Notice = "DDL tidak dijalankan: di MySQL DDL melakukan implicit commit sehingga tidak bisa di-rollback"
 			out.Statements = append(out.Statements, item)
 			continue
 		}
@@ -75,11 +72,11 @@ func (e Explainer) Explain(ctx context.Context, in dbms.ExplainInput) (*dbms.Exp
 		}
 		if rows.Next() {
 			if err = rows.Scan(ptrs...); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, err
 			}
 		}
-		rows.Close()
+		_ = rows.Close()
 		var raw string
 		if len(values) > 0 {
 			switch v := values[0].(type) {
