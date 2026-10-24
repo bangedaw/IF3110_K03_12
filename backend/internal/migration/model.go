@@ -3,6 +3,9 @@ package migration
 import (
 	"context"
 	"time"
+
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
 )
 
 type Status string
@@ -37,9 +40,12 @@ type Run struct {
 	ID                   int64      `json:"id"`
 	MigrationID          int64      `json:"migrationId"`
 	DatabaseID           int64      `json:"databaseId"`
+	Title                string     `json:"title"`
+	Version              *int       `json:"version,omitempty"`
 	SQL                  string     `json:"sql"`
 	Checksum             string     `json:"checksum"`
 	ExecutedBy           int64      `json:"executedBy"`
+	ExecutedByName       string     `json:"executedByName"`
 	Status               Status     `json:"status"`
 	StartedAt            time.Time  `json:"startedAt"`
 	FinishedAt           *time.Time `json:"finishedAt,omitempty"`
@@ -64,6 +70,7 @@ type ExecuteInput struct {
 }
 
 type Repository interface {
+	DatabaseKind(ctx context.Context, databaseID int64) (string, error)
 	Head(ctx context.Context, databaseID int64) (int, error)
 	CreateDraft(ctx context.Context, actorID, databaseID int64, in CreateInput, baseVersion int, checksum []byte) (*Migration, error)
 	Get(ctx context.Context, databaseID, migrationID int64) (*Migration, error)
@@ -71,12 +78,11 @@ type Repository interface {
 	UpdateDraft(ctx context.Context, actorID, databaseID, migrationID int64, in UpdateInput, checksum []byte) (*Migration, error)
 	DeleteDraft(ctx context.Context, databaseID, migrationID int64, revision int) error
 	StartRun(ctx context.Context, actorID int64, m *Migration) (*Run, error)
-	FinishRun(ctx context.Context, runID int64, status Status, version *int, errCode, errMessage string, failedIndex *int) error
+	FinishRun(ctx context.Context, runID int64, status Status, version *int, errCode, errMessage string, failedIndex *int) (*Run, error)
 	Runs(ctx context.Context, databaseID, migrationID int64) ([]Run, error)
 	History(ctx context.Context, databaseID int64, limit, offset int) ([]Run, int, error)
 	WithDatabaseLock(ctx context.Context, databaseID int64, fn func(context.Context) error) error
 	SaveSnapshot(ctx context.Context, databaseID, runID, actorID int64, model any) error
-	Audit(ctx context.Context, actorID int64, action, resourceType, resourceID, outcome string, metadata map[string]any) error
 }
 type TargetRegistry interface {
 	Get(ctx context.Context, databaseID int64) (Target, error)
@@ -96,12 +102,11 @@ type ApplyResult struct {
 	StatementsExecuted int
 	AppliedAt          time.Time
 }
-type Authorizer interface {
-	Authorize(ctx context.Context, userID, databaseID int64, action string) error
-}
+
 type Service struct {
 	Repo    Repository
 	Targets TargetRegistry
-	Auth    Authorizer
+	Auth    authz.Authorizer
+	Audit   *audit.Logger
 	Now     func() time.Time
 }

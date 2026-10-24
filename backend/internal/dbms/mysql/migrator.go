@@ -27,6 +27,8 @@ func (e *StatementError) Error() string {
 }
 func (e *StatementError) Unwrap() error { return e.Err }
 
+func (e *StatementError) StatementIndex() int { return e.Index }
+
 func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyResult, error) {
 	if m.DB == nil {
 		return nil, errors.New("mysql migrator: nil DB")
