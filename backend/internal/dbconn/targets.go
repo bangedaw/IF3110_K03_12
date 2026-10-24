@@ -54,6 +54,14 @@ func (t target) Explain(ctx context.Context, sql string, analyze bool) (any, err
 	return res, nil
 }
 
+func (t target) CommittedRun(ctx context.Context, runID int64) (int, bool, error) {
+	version, found, err := t.conn.Migrator().CommittedVersion(ctx, runID)
+	if err != nil {
+		return 0, false, mapOpenError(err)
+	}
+	return version, found, nil
+}
+
 func (t target) Snapshot(ctx context.Context) (any, error) {
 	model, err := t.conn.Inspector().Snapshot(ctx)
 	if err != nil {

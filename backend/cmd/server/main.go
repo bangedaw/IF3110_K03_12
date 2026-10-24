@@ -97,11 +97,19 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 	connSvc := dbconn.NewService(store, registry, cipher, az)
 	explorerSvc := explorer.NewService(store, registry, az)
 	adminSvc := admin.NewService(pool, az, auditLog)
+	migrationRepo := migration.NewRepository(pool)
+	migrationTargets := dbconn.Targets{Registry: registry}
 	migrationSvc := &migration.Service{
-		Repo:    migration.NewRepository(pool),
-		Targets: dbconn.Targets{Registry: registry},
+		Repo:    migrationRepo,
+		Targets: migrationTargets,
 		Auth:    az,
 		Audit:   auditLog,
+	}
+	reconcileCtx, cancelReconcile := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancelReconcile()
+	if err := (migration.Reconciler{Repo: migrationRepo, Targets: migrationTargets, Logger: logger}).Reconcile(reconcileCtx); err != nil {
+		registry.Close()
+		return nil, nil, err
 	}
 
 	r := httpx.NewRouter(logger)

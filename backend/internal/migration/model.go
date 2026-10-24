@@ -91,6 +91,7 @@ type Target interface {
 	Apply(ctx context.Context, in ApplyRequest) (*ApplyResult, error)
 	Explain(ctx context.Context, sql string, analyze bool) (any, error)
 	Snapshot(ctx context.Context) (any, error)
+	CommittedRun(ctx context.Context, runID int64) (version int, found bool, err error)
 }
 type ApplyRequest struct {
 	RunID, MigrationID, DatabaseID int64

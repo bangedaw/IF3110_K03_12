@@ -2,6 +2,7 @@ package migration_test
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"sync"
 	"testing"
@@ -322,4 +323,64 @@ func TestMigrationActionsAreAudited(t *testing.T) {
 		actions = append(actions, a)
 	}
 	assert.Equal(t, []string{"migration.create:success", "migration.execute:success"}, actions)
+}
+
+func (e *env) orphanRun(databaseID int64, m *migration.Migration, commitOnTarget bool) *migration.Run {
+	e.t.Helper()
+	ctx := context.Background()
+	repo := e.svc.Repo
+	run, err := repo.StartRun(ctx, editor.UserID, m)
+	require.NoError(e.t, err)
+	if commitOnTarget {
+		target, err := e.svc.Targets.Get(ctx, databaseID)
+		require.NoError(e.t, err)
+		sum, err := hex.DecodeString(run.Checksum)
+		require.NoError(e.t, err)
+		_, err = target.Apply(ctx, migration.ApplyRequest{RunID: run.ID, MigrationID: m.ID, DatabaseID: databaseID, Version: 1, Checksum: sum, SQL: m.SQL})
+		require.NoError(e.t, err)
+	}
+	return run
+}
+
+func TestReconcilerResolvesRunsLeftRunning(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	committed := e.draft("Ter-commit sebelum crash", "CREATE TABLE app.r1 (id int)")
+	lost := e.draft("Belum ter-commit", "CREATE TABLE app.r2 (id int)")
+	dead, err := e.svc.Create(ctx, editor, e.deadID, migration.CreateInput{Title: "Target mati", SQL: "CREATE TABLE r3 (id int)"})
+	require.NoError(t, err)
+
+	committedRun := e.orphanRun(e.dbID, committed, true)
+	lostRun := e.orphanRun(e.dbID, lost, false)
+	deadRun := e.orphanRun(e.deadID, dead, false)
+
+	rec := migration.Reconciler{Repo: e.svc.Repo.(*migration.PGRepository), Targets: e.svc.Targets}
+	require.NoError(t, rec.Reconcile(ctx))
+
+	runs, err := e.svc.Runs(ctx, editor, e.dbID, committed.ID)
+	require.NoError(t, err)
+	assert.Equal(t, committedRun.ID, runs[0].ID)
+	assert.Equal(t, migration.RunSucceeded, runs[0].Status)
+	m, err := e.svc.Get(ctx, editor, e.dbID, committed.ID)
+	require.NoError(t, err)
+	assert.Equal(t, migration.Applied, m.Status)
+	assert.Equal(t, 1, *m.Version)
+
+	runs, err = e.svc.Runs(ctx, editor, e.dbID, lost.ID)
+	require.NoError(t, err)
+	assert.Equal(t, lostRun.ID, runs[0].ID)
+	assert.Equal(t, migration.RunFailed, runs[0].Status)
+	assert.Equal(t, "RECONCILED", runs[0].ErrorCode)
+	m, err = e.svc.Get(ctx, editor, e.dbID, lost.ID)
+	require.NoError(t, err)
+	assert.Equal(t, migration.Draft, m.Status)
+
+	runs, err = e.svc.Runs(ctx, editor, e.deadID, dead.ID)
+	require.NoError(t, err)
+	assert.Equal(t, deadRun.ID, runs[0].ID)
+	assert.Equal(t, migration.RunRunning, runs[0].Status, "target mati: run dibiarkan agar bisa direkonsiliasi nanti")
+
+	head, err := e.svc.Head(ctx, editor, e.dbID)
+	require.NoError(t, err)
+	assert.Equal(t, 1, head)
 }

@@ -302,3 +302,15 @@ func toRun(r gen.ListMigrationHistoryRow) Run {
 	}
 	return out
 }
+
+func (r *PGRepository) RunningRuns(ctx context.Context) ([]Run, error) {
+	rows, err := r.q.ListRunningMigrationRuns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Run, len(rows))
+	for i, row := range rows {
+		out[i] = toRun(gen.ListMigrationHistoryRow(row))
+	}
+	return out, nil
+}

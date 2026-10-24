@@ -102,3 +102,13 @@ SELECT count(*) FROM migration_runs WHERE database_id = @database_id;
 -- name: CreateRunSnapshot :exec
 INSERT INTO schema_snapshots (database_id, migration_run_id, taken_by, model)
 VALUES (@database_id, @migration_run_id, @taken_by, @model);
+
+-- name: ListRunningMigrationRuns :many
+SELECT r.id, r.migration_id, r.database_id, r.sql_text, r.checksum, r.executed_by, r.status, r.started_at,
+       r.finished_at, r.error_code, r.error_message, r.failed_statement_index,
+       m.title, m.version, u.username AS executed_by_name
+FROM migration_runs r
+         JOIN migrations m ON m.id = r.migration_id
+         JOIN users u ON u.id = r.executed_by
+WHERE r.status = 'running'
+ORDER BY r.id;

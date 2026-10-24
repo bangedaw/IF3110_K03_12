@@ -460,6 +460,71 @@ func (q *Queries) ListMigrations(ctx context.Context, arg ListMigrationsParams) 
 	return items, nil
 }
 
+const listRunningMigrationRuns = `-- name: ListRunningMigrationRuns :many
+SELECT r.id, r.migration_id, r.database_id, r.sql_text, r.checksum, r.executed_by, r.status, r.started_at,
+       r.finished_at, r.error_code, r.error_message, r.failed_statement_index,
+       m.title, m.version, u.username AS executed_by_name
+FROM migration_runs r
+         JOIN migrations m ON m.id = r.migration_id
+         JOIN users u ON u.id = r.executed_by
+WHERE r.status = 'running'
+ORDER BY r.id
+`
+
+type ListRunningMigrationRunsRow struct {
+	ID                   int64
+	MigrationID          int64
+	DatabaseID           int64
+	SqlText              string
+	Checksum             []byte
+	ExecutedBy           int64
+	Status               RunStatus
+	StartedAt            pgtype.Timestamptz
+	FinishedAt           pgtype.Timestamptz
+	ErrorCode            pgtype.Text
+	ErrorMessage         pgtype.Text
+	FailedStatementIndex pgtype.Int4
+	Title                string
+	Version              pgtype.Int4
+	ExecutedByName       string
+}
+
+func (q *Queries) ListRunningMigrationRuns(ctx context.Context) ([]ListRunningMigrationRunsRow, error) {
+	rows, err := q.db.Query(ctx, listRunningMigrationRuns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRunningMigrationRunsRow
+	for rows.Next() {
+		var i ListRunningMigrationRunsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MigrationID,
+			&i.DatabaseID,
+			&i.SqlText,
+			&i.Checksum,
+			&i.ExecutedBy,
+			&i.Status,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.ErrorCode,
+			&i.ErrorMessage,
+			&i.FailedStatementIndex,
+			&i.Title,
+			&i.Version,
+			&i.ExecutedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markMigrationApplied = `-- name: MarkMigrationApplied :exec
 UPDATE migrations
 SET status     = 'applied',

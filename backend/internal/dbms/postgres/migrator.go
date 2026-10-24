@@ -45,16 +45,16 @@ func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyRes
 	if err != nil {
 		return nil, fmt.Errorf("connect target: %w", err)
 	}
-	defer conn.Close(context.Background())
+	defer func() { _ = conn.Close(context.Background()) }()
 
 	var locked bool
-	if err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1, $2)`, int32(in.DatabaseID>>32), int32(in.DatabaseID)).Scan(&locked); err != nil {
+	if err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1::bigint)`, in.DatabaseID).Scan(&locked); err != nil {
 		return nil, fmt.Errorf("acquire target advisory lock: %w", err)
 	}
 	if !locked {
 		return nil, ErrLockBusy
 	}
-	defer conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1, $2)`, int32(in.DatabaseID>>32), int32(in.DatabaseID))
+	defer func() { _, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1::bigint)`, in.DatabaseID) }()
 
 	stmts, err := sqlsplit.Split(in.SQL, sqlsplit.PostgreSQL)
 	if err != nil {
@@ -127,6 +127,24 @@ func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyRes
 }
 
 var ErrLockBusy = errors.New("target database already has a migration running")
+
+func (m Migrator) CommittedVersion(ctx context.Context, runID int64) (int, bool, error) {
+	conn, err := m.Connector.Connect(ctx)
+	if err != nil {
+		return 0, false, fmt.Errorf("connect target: %w", err)
+	}
+	defer func() { _ = conn.Close(context.Background()) }()
+	var version int
+	err = conn.QueryRow(ctx, `SELECT version FROM _dbmp_schema_history WHERE run_id = $1`, runID).Scan(&version)
+	var pe *pgconn.PgError
+	switch {
+	case errors.Is(err, pgx.ErrNoRows), errors.As(err, &pe) && pe.Code == "42P01":
+		return 0, false, nil
+	case err != nil:
+		return 0, false, err
+	}
+	return version, true, nil
+}
 
 type DSNConnector struct{ DSN string }
 

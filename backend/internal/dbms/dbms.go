@@ -61,6 +61,7 @@ type DataBrowser interface {
 type Migrator interface {
 	SupportsTransactionalDDL() bool
 	Apply(ctx context.Context, in ApplyInput) (*ApplyResult, error)
+	CommittedVersion(ctx context.Context, runID int64) (version int, found bool, err error)
 }
 
 type Explainer interface {
@@ -140,6 +141,10 @@ func (m unimplementedMigrator) SupportsTransactionalDDL() bool { return m.transa
 
 func (unimplementedMigrator) Apply(context.Context, ApplyInput) (*ApplyResult, error) {
 	return nil, ErrNotImplemented
+}
+
+func (unimplementedMigrator) CommittedVersion(context.Context, int64) (int, bool, error) {
+	return 0, false, ErrNotImplemented
 }
 
 func UnimplementedExplainer() Explainer { return unimplementedExplainer{} }
