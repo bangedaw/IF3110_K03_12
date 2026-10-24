@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -59,7 +58,7 @@ func run() error {
 		return err
 	}
 
-	handler, cleanup, err := newHandler(cfg, pool, logger, web.Dist())
+	handler, cleanup, err := newHandler(cfg, pool, logger)
 	if err != nil {
 		return err
 	}
@@ -84,7 +83,7 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, spa fs.FS) (http.Handler, func(), error) {
+func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (http.Handler, func(), error) {
 	cipher, err := secret.New(cfg.SecretKey)
 	if err != nil {
 		return nil, nil, err
@@ -96,6 +95,7 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, spa 
 	authSvc := auth.NewService(pool, cfg.Session, cfg.CSRFKey, cfg.IsProduction())
 	connSvc := dbconn.NewService(store, registry, cipher, az)
 	explorerSvc := explorer.NewService(store, registry, az)
+	adminSvc := admin.NewService(pool, az, auditLog)
 
 	r := httpx.NewRouter(logger)
 	r.Route("/api", func(api chi.Router) {
@@ -111,7 +111,7 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, spa 
 
 		api.Group(func(p chi.Router) {
 			p.Use(authSvc.Middleware)
-			admin.Routes(p, admin.NewService(pool, az, auditLog))
+			admin.Routes(p, adminSvc)
 			dbconn.Routes(p, connSvc)
 			explorer.Routes(p, explorerSvc)
 		})
@@ -122,6 +122,7 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, spa 
 		Authz:       az,
 		Connections: connSvc,
 		Explorer:    explorerSvc,
+		Admin:       adminSvc,
 		Reload:      cfg.Env == "dev",
 		AssetsDir:   "internal/web",
 	})
@@ -129,8 +130,6 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, spa 
 		return nil, nil, err
 	}
 	pages.Mount(r)
-	if h, ok := web.Handler(spa); ok {
-		r.Handle("/*", h)
-	}
+	r.NotFound(pages.NotFound)
 	return r, registry.Close, nil
 }

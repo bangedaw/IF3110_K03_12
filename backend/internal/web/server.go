@@ -17,6 +17,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/admin"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/auth"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
@@ -47,6 +48,7 @@ type Deps struct {
 	Guard       Guard
 	Authz       authz.Authorizer
 	Connections *dbconn.Service
+	Admin       *admin.Service
 	Explorer    *explorer.Service
 	Drafts      DraftSaver
 	Reload      bool
@@ -58,6 +60,7 @@ type Server struct {
 	guard     Guard
 	az        authz.Authorizer
 	conns     *dbconn.Service
+	admin     *admin.Service
 	explorer  *explorer.Service
 	drafts    DraftSaver
 	templates *templateSet
@@ -89,11 +92,12 @@ func New(d Deps) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{
+	srv := &Server{
 		logger:    d.Logger,
 		guard:     d.Guard,
 		az:        d.Authz,
 		conns:     d.Connections,
+		admin:     d.Admin,
 		explorer:  d.Explorer,
 		drafts:    d.Drafts,
 		templates: tpl,
@@ -102,7 +106,14 @@ func New(d Deps) (*Server, error) {
 			{Label: "Database", Path: "/databases"},
 			{Label: "Koneksi", Path: "/admin/connections", AdminOnly: true},
 		},
-	}, nil
+	}
+	if d.Admin != nil {
+		srv.nav = append(srv.nav,
+			NavItem{Label: "Pengguna", Path: "/admin/users", AdminOnly: true},
+			NavItem{Label: "Group", Path: "/admin/groups", AdminOnly: true},
+		)
+	}
+	return srv, nil
 }
 
 type DatabaseTab struct {
@@ -120,10 +131,14 @@ func (s *Server) Mount(r chi.Router) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		s.static.ServeHTTP(w, req)
 	})
+	s.mountAuth(r)
 	r.Group(func(g chi.Router) {
 		g.Use(s.protect)
 		g.Post("/logout", s.logout)
 		s.mountConnections(g)
+		if s.admin != nil {
+			s.mountAdmin(g)
+		}
 		s.mountExplorer(g)
 		s.mountSchemaDiff(g)
 	})

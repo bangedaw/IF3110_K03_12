@@ -56,18 +56,22 @@ func (s *Server) mountConnections(r chi.Router) {
 	r.Post("/admin/connections/{databaseId}/test", s.connectionTestSaved)
 }
 
-func (s *Server) adminPrincipal(r *http.Request) (authz.Principal, error) {
+func (s *Server) authorizeAction(r *http.Request, action authz.Action) (authz.Principal, error) {
 	p, err := s.principal(r)
 	if err != nil {
 		return p, err
 	}
 	if s.az != nil {
-		return p, s.az.Authorize(r.Context(), p, authz.ActionManageConnections, authz.Resource{})
+		return p, s.az.Authorize(r.Context(), p, action, authz.Resource{})
 	}
 	if !p.IsPlatformAdmin {
 		return p, authz.ErrForbidden
 	}
 	return p, nil
+}
+
+func (s *Server) adminPrincipal(r *http.Request) (authz.Principal, error) {
+	return s.authorizeAction(r, authz.ActionManageConnections)
 }
 
 func (s *Server) connectionList(w http.ResponseWriter, r *http.Request) {

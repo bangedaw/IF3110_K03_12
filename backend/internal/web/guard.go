@@ -16,6 +16,7 @@ type Identity struct {
 
 type Guard interface {
 	Authenticate(w http.ResponseWriter, r *http.Request) (Identity, error)
+	Login(w http.ResponseWriter, r *http.Request, username, password string) error
 	Logout(w http.ResponseWriter, r *http.Request, id Identity) error
 }
 
@@ -29,6 +30,10 @@ func (g *AuthGuard) Authenticate(w http.ResponseWriter, r *http.Request) (Identi
 		return Identity{}, err
 	}
 	return Identity{Principal: id.Principal, Username: id.Username, CSRF: id.CSRF, handle: id}, nil
+}
+
+func (g *AuthGuard) Login(w http.ResponseWriter, r *http.Request, username, password string) error {
+	return g.svc.WebLogin(w, r, username, password)
 }
 
 func (g *AuthGuard) Logout(w http.ResponseWriter, r *http.Request, id Identity) error {

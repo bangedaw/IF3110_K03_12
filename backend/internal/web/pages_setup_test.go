@@ -12,10 +12,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
 
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/admin"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbconn"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/explorer"
@@ -46,11 +49,39 @@ type fakeGuard struct {
 
 func csrfFor(id int64) string { return fmt.Sprintf("csrf-%d", id) }
 
+const testSessionCookie = "test_session"
+
+var loginUsers = map[string]int64{"alice": viewerID, "admin": adminID}
+
+func (g *fakeGuard) Login(w http.ResponseWriter, _ *http.Request, username, password string) error {
+	fields := map[string]string{}
+	if username == "" {
+		fields["username"] = "wajib diisi"
+	}
+	if password == "" {
+		fields["password"] = "wajib diisi"
+	}
+	if len(fields) > 0 {
+		return apperr.Validation(fields)
+	}
+	id, ok := loginUsers[username]
+	if !ok || password != "rahasia123" {
+		return apperr.New(apperr.CodeUnauthenticated, "username atau password salah")
+	}
+	http.SetCookie(w, &http.Cookie{Name: testSessionCookie, Value: fmt.Sprint(id), Path: "/", HttpOnly: true})
+	return nil
+}
+
 func (g *fakeGuard) Authenticate(_ http.ResponseWriter, r *http.Request) (web.Identity, error) {
 	if r.Header.Get("X-Test-Session") == "expired" {
 		return web.Identity{}, apperr.New(apperr.CodeSessionExpired, "sesi berakhir")
 	}
 	raw := r.Header.Get("X-Test-User")
+	if raw == "" {
+		if c, err := r.Cookie(testSessionCookie); err == nil {
+			raw = c.Value
+		}
+	}
 	if raw == "" {
 		return web.Identity{}, apperr.ErrUnauthenticated
 	}
@@ -99,6 +130,7 @@ func (f *fakeSaver) count() int {
 type env struct {
 	t        *testing.T
 	handler  http.Handler
+	router   chi.Router
 	srv      *web.Server
 	platform *pgxpool.Pool
 	target   *pgxpool.Pool
@@ -130,11 +162,14 @@ func newEnv(t *testing.T, withSaver bool) *env {
 
 	for _, id := range []int64{adminID, viewerID, nobodyID, editorID, liveOnlyID, diffViewID} {
 		_, err := platform.Exec(context.Background(),
-			`INSERT INTO users (id, username, password_hash) VALUES ($1, $2, 'x') ON CONFLICT DO NOTHING`, id, fmt.Sprintf("user%d", id))
+			`INSERT INTO users (id, username, password_hash, is_platform_admin) VALUES ($1, $2, 'x', $3) ON CONFLICT DO NOTHING`, id, fmt.Sprintf("user%d", id), id == adminID)
 		require.NoError(t, err)
 	}
 
 	_, err = staging.Exec(context.Background(), `ALTER TABLE app.books DROP COLUMN tags; ALTER TABLE app.books ADD COLUMN extra TEXT`)
+	require.NoError(t, err)
+
+	_, err = platform.Exec(context.Background(), `SELECT setval(pg_get_serial_sequence('users', 'id'), 1000)`)
 	require.NoError(t, err)
 
 	e := &env{t: t, platform: platform, target: target, staging: staging, guard: &fakeGuard{}, cipher: cipher}
@@ -167,6 +202,7 @@ func newEnv(t *testing.T, withSaver bool) *env {
 		Authz:       az,
 		Connections: dbconn.NewService(store, registry, cipher, az),
 		Explorer:    explorer.NewService(store, registry, az),
+		Admin:       admin.NewService(platform, az, audit.New(platform)),
 	}
 	if withSaver {
 		e.saver = &fakeSaver{}
@@ -178,6 +214,7 @@ func newEnv(t *testing.T, withSaver bool) *env {
 	r := httpx.NewRouter(deps.Logger)
 	srv.Mount(r)
 	e.handler = r
+	e.router = r
 	e.srv = srv
 	return e
 }
@@ -281,4 +318,27 @@ func validConnectionForm(name string) url.Values {
 		"sslMode":      {"disable"},
 		"isActive":     {"on"},
 	}
+}
+
+func (e *env) insertGroup(name string) int64 {
+	e.t.Helper()
+	var id int64
+	require.NoError(e.t, e.platform.QueryRow(context.Background(),
+		`INSERT INTO groups (name) VALUES ($1) RETURNING id`, name).Scan(&id))
+	return id
+}
+
+func (e *env) insertUser(username string, active bool) int64 {
+	e.t.Helper()
+	var id int64
+	require.NoError(e.t, e.platform.QueryRow(context.Background(),
+		`INSERT INTO users (username, password_hash, is_active) VALUES ($1, 'x', $2) RETURNING id`, username, active).Scan(&id))
+	return id
+}
+
+func (e *env) scalar(query string, args ...any) string {
+	e.t.Helper()
+	var out string
+	require.NoError(e.t, e.platform.QueryRow(context.Background(), query, args...).Scan(&out))
+	return out
 }

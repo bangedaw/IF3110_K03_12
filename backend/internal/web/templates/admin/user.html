@@ -1,0 +1,75 @@
+{{define "title"}}{{if .Data.Editing}}Pengguna {{.Data.Username}}{{else}}Tambah pengguna{{end}}{{end}}
+{{define "content"}}
+{{$d := .Data}}
+<div class="page-head">
+  <div>
+    <h1>{{if $d.Editing}}{{$d.Username}}{{else}}Tambah pengguna{{end}}</h1>
+    <p class="muted"><a href="/admin/users">Kembali ke daftar pengguna</a></p>
+  </div>
+  {{if $d.Editing}}<span class="badge{{if $d.IsActive}} badge-success{{end}}">{{if $d.IsActive}}Aktif{{else}}Nonaktif{{end}}</span>{{end}}
+</div>
+{{with index $d.Errors "form"}}<div class="notice notice-danger" role="alert">{{.}}</div>{{end}}
+
+<form class="card" method="post" action="{{if $d.Editing}}/admin/users/{{$d.ID}}{{else}}/admin/users/new{{end}}" novalidate>
+  {{template "csrf" .}}
+  <div class="form-grid">
+    {{if not $d.Editing}}
+    <div class="field">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="off" value="{{$d.Username}}" required{{if index $d.Errors "username"}} class="is-invalid" aria-invalid="true"{{end}}>
+      <span class="hint">3-64 karakter: huruf, angka, _ . -</span>
+      {{with index $d.Errors "username"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    {{end}}
+    <div class="field">
+      <label for="displayName">Nama tampilan</label>
+      <input id="displayName" name="displayName" type="text" value="{{$d.DisplayName}}"{{if index $d.Errors "displayName"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.Errors "displayName"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    {{if not $d.Editing}}
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" value="" required{{if index $d.Errors "password"}} class="is-invalid" aria-invalid="true"{{end}}>
+      <span class="hint">8-256 karakter</span>
+      {{with index $d.Errors "password"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    {{end}}
+  </div>
+  <p class="check"><input id="isAdmin" name="isAdmin" type="checkbox"{{if $d.IsAdmin}} checked{{end}}><label for="isAdmin">Platform Admin</label></p>
+  {{if $d.Editing}}<p class="check"><input id="isActive" name="isActive" type="checkbox"{{if $d.IsActive}} checked{{end}}><label for="isActive">Akun aktif</label></p>
+  {{if $d.Self}}<p class="hint muted">Ini akun Anda sendiri: status admin dan aktif tidak dapat dicabut.</p>{{end}}{{end}}
+  <div class="actions">
+    <button class="btn" type="submit">{{if $d.Editing}}Simpan{{else}}Buat pengguna{{end}}</button>
+    <a class="btn btn-ghost" href="/admin/users">Batal</a>
+  </div>
+</form>
+
+{{if $d.Editing}}
+<form class="card" method="post" action="/admin/users/{{$d.ID}}/password" novalidate>
+  {{template "csrf" .}}
+  <h2>Reset password</h2>
+  <p class="muted">Setelah reset, semua session pengguna ini dicabut.</p>
+  <div class="form-grid">
+    <div class="field">
+      <label for="new-password">Password baru</label>
+      <input id="new-password" name="password" type="password" autocomplete="new-password" value=""{{if index $d.PasswordErrors "password"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.PasswordErrors "password"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    <div class="field">
+      <label for="password-confirm">Ulangi password baru</label>
+      <input id="password-confirm" name="passwordConfirm" type="password" autocomplete="new-password" value=""{{if index $d.PasswordErrors "passwordConfirm"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.PasswordErrors "passwordConfirm"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+  </div>
+  <div class="actions"><button class="btn btn-secondary" type="submit">Reset password</button></div>
+</form>
+
+<div class="card">
+  <h2>Session dan penghapusan</h2>
+  <div class="actions">
+    <form class="inline-form" method="post" action="/admin/users/{{$d.ID}}/revoke-sessions">{{template "csrf" .}}<button class="btn btn-secondary" type="submit">Cabut semua session</button></form>
+    {{if not $d.Self}}<a class="btn btn-danger" href="/admin/users/{{$d.ID}}/delete">Hapus pengguna</a>{{end}}
+  </div>
+</div>
+{{end}}
+{{end}}

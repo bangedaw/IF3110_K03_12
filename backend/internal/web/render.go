@@ -2,15 +2,18 @@ package web
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/httpx"
 )
 
 const flashCookie = "dbmp_flash"
@@ -188,4 +191,16 @@ func takeFlash(w http.ResponseWriter, r *http.Request) *Flash {
 		f.Kind = "info"
 	}
 	return &f
+}
+
+func (s *Server) NotFound(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		httpx.Error(w, r, apperr.ErrNotFound)
+		return
+	}
+	secureHeaders(w)
+	if id, err := s.guard.Authenticate(w, r); err == nil {
+		r = r.WithContext(context.WithValue(r.Context(), identityKey{}, id))
+	}
+	s.renderError(w, r, http.StatusNotFound, "Tidak ditemukan", "Halaman atau data yang diminta tidak ditemukan.")
 }

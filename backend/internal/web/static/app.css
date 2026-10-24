@@ -96,7 +96,8 @@ textarea.code { min-height: 18rem; font-size: .85rem; white-space: pre; }
 .check input { width: auto; }
 
 .layout-split { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 1.5rem; align-items: start; }
-@media (max-width: 800px) { .layout-split { grid-template-columns: 1fr; } }
+.layout-split > * { min-width: 0; }
+@media (max-width: 800px) { .layout-split { grid-template-columns: minmax(0, 1fr); } }
 .tree { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: .75rem; }
 .tree ul { list-style: none; padding-left: .75rem; margin: .25rem 0 .5rem; }
 .tree li { padding: .1rem 0; }
@@ -104,7 +105,7 @@ textarea.code { min-height: 18rem; font-size: .85rem; white-space: pre; }
 .tree-schema { margin-bottom: .35rem; }
 .tree-name { display: block; }
 
-.tabs { display: flex; gap: .25rem; border-bottom: 1px solid var(--border); margin: 1rem 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: .25rem; border-bottom: 1px solid var(--border); margin: 1rem 0; }
 .tabs a { padding: .4rem .9rem; text-decoration: none; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; }
 .tabs a[aria-current="page"] { color: var(--text); border-bottom-color: var(--primary); font-weight: 600; }
 
@@ -125,7 +126,11 @@ textarea.code { min-height: 18rem; font-size: .85rem; white-space: pre; }
 .error-page { text-align: center; padding: 3rem 1rem; }
 .error-status { font-size: 3rem; font-weight: 700; color: var(--muted); margin: 0; }
 
-.card .field + .field { margin-top: 1rem; }
+.card > .field + .field { margin-top: 1rem; }
+.card > h2:first-child { margin-top: 0; }
+.card > h2 { margin-top: 0; }
 .card > .actions, .card > .check { margin-top: 1rem; }
 .card > .form-grid + .check { margin-top: 1rem; }
 h3 { font-size: 1rem; margin: 1rem 0 .5rem; }
+
+.auth-card { max-width: 24rem; margin: 3rem auto; }
