@@ -151,7 +151,24 @@ karena level dihitung ulang setiap kali (tanpa cache).
   lubang. Migration yang sudah applied tidak bisa diubah; perbaikan lewat migration baru.
 - Setiap percobaan eksekusi dicatat sebagai *run*: SQL yang dijalankan, pelaksana, waktu, status, error.
 - Eksekusi berjalan dalam transaction: commit jika semua statement berhasil, rollback jika ada yang gagal.
-  Hanya satu eksekusi per database pada satu waktu.
+  Run yang gagal mencatat nomor statement yang gagal beserta pesan error database.
+- Hanya satu eksekusi per database pada satu waktu: advisory lock di platform DB (eksekusi kedua langsung
+  ditolak 409) dan di database target.
+- Jika versi database berubah sejak draft dibuat (`base_version` ≠ versi saat ini), eksekusi ditolak 409
+  sampai pengguna mengonfirmasi bahwa SQL sudah ditinjau ulang.
+- Statement pengendali transaksi (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`) dan statement yang tidak
+  boleh berada dalam transaction PostgreSQL (`VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`)
+  ditolak saat draft disimpan (422).
+- Database target menyimpan tabel `_dbmp_schema_history` yang ditulis dalam transaction yang sama dengan
+  perubahan migration. Saat server start (sebelum menerima request), *reconciler* memeriksa run yang masih
+  berstatus `running` dari proses sebelumnya: bila tercatat di `_dbmp_schema_history`, run ditandai
+  berhasil dan migration diberi versinya; bila tidak, run ditandai gagal (`RECONCILED`). Run pada target
+  yang tidak terjangkau dibiarkan `running` dan diperiksa lagi pada start berikutnya.
+- Setelah eksekusi berhasil, snapshot schema disimpan dengan referensi ke run-nya (dipakai schema diff).
+- EXPLAIN / EXPLAIN ANALYZE (butuh `edit`): PostgreSQL menjalankan seluruh script dalam transaction yang
+  selalu di-rollback; DDL dijalankan hanya sebagai konteks. Plan ditampilkan sebagai pohon node (jenis
+  node, relasi, index, kondisi join, cost, estimasi vs aktual baris, waktu, loop), dengan penanda node
+  termahal dan Seq Scan pada tabel besar. Nilai sequence yang terpakai saat ANALYZE tidak ikut di-rollback.
 
 ## 9. Kredensial database target
 
@@ -207,8 +224,12 @@ di log server dan tidak menggagalkan request.
 - Di MySQL, "schema" sama dengan nama database yang terhubung, jadi explorer menampilkan satu schema.
   Introspeksi memakai `information_schema`; viewer memakai `START TRANSACTION READ ONLY`.
 - DDL MySQL melakukan *implicit commit* sehingga tidak bisa di-rollback. Migration MySQL bersifat
-  non-transaksional: kegagalan di tengah script dapat meninggalkan perubahan parsial, dan halaman
-  eksekusi wajib memperingatkan hal ini sebelum dijalankan.
+  non-transaksional untuk DDL: kegagalan di tengah script dapat meninggalkan perubahan DDL parsial, dan
+  halaman eksekusi memperingatkan hal ini sebelum dijalankan. Statement DML tetap dijalankan dalam
+  transaction sehingga migration yang hanya berisi DML di-rollback penuh saat gagal.
+- EXPLAIN MySQL tidak pernah menjalankan DDL (DDL ditandai "tidak dijalankan"), dan EXPLAIN ANALYZE
+  ditolak untuk script yang mengandung DDL. Plan MySQL ditampilkan sebagai JSON (atau teks pohon untuk
+  ANALYZE).
 
 ## 13. Schema diff
 
