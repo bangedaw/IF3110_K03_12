@@ -1,0 +1,10 @@
+{{define "nav"}}{{if .User}}<nav class="nav" aria-label="Utama">
+  {{$path := .Path}}
+  {{range .Nav}}<a href="{{.Path}}"{{if hasPrefix $path .Path}} aria-current="page"{{end}}>{{.Label}}</a>
+  {{end}}
+</nav>
+<form class="userbox" method="post" action="/logout">
+  {{template "csrf" .}}
+  <span class="username">{{.User.Username}}{{if .User.IsAdmin}} <span class="badge">admin</span>{{end}}</span>
+  <button class="btn btn-ghost" type="submit">Keluar</button>
+</form>{{end}}{{end}}

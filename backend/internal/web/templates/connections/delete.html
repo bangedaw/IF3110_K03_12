@@ -1,0 +1,13 @@
+{{define "title"}}Hapus koneksi{{end}}
+{{define "content"}}
+<div class="page-head"><h1>Hapus koneksi</h1></div>
+<form class="card" method="post" action="/admin/connections/{{.Data.Connection.ID}}/delete">
+  {{template "csrf" .}}
+  <p>Hapus koneksi <strong>{{.Data.Connection.Name}}</strong> <span class="mono">({{.Data.Connection.Host}}:{{.Data.Connection.Port}}/{{.Data.Connection.DatabaseName}})</span>?</p>
+  <div class="notice notice-warning">Grant akses dan riwayat migration database ini ikut terhapus. Aksi ini tidak dapat dibatalkan.</div>
+  <div class="actions">
+    <button class="btn btn-danger" type="submit">Ya, hapus</button>
+    <a class="btn btn-secondary" href="/admin/connections">Batal</a>
+  </div>
+</form>
+{{end}}
