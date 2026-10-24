@@ -1,6 +1,7 @@
 package web_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -133,6 +134,7 @@ type env struct {
 	handler  http.Handler
 	router   chi.Router
 	srv      *web.Server
+	logs     *syncBuffer
 	platform *pgxpool.Pool
 	target   *pgxpool.Pool
 	staging  *pgxpool.Pool
@@ -178,7 +180,8 @@ func newEnvWith(t *testing.T, withSaver, withMigrations bool) *env {
 	_, err = platform.Exec(context.Background(), `SELECT setval(pg_get_serial_sequence('users', 'id'), 1000)`)
 	require.NoError(t, err)
 
-	e := &env{t: t, platform: platform, target: target, staging: staging, guard: &fakeGuard{}, cipher: cipher}
+	logs := &syncBuffer{}
+	e := &env{t: t, logs: logs, platform: platform, target: target, staging: staging, guard: &fakeGuard{}, cipher: cipher}
 	targetCfg, stagingCfg := target.Config().ConnConfig, staging.Config().ConnConfig
 	e.liveID = e.insertConnection("live", "postgres", targetCfg.Host, int(targetCfg.Port), targetCfg.Database, targetCfg.User, targetCfg.Password, true)
 	e.stagingID = e.insertConnection("staging", "postgres", stagingCfg.Host, int(stagingCfg.Port), stagingCfg.Database, stagingCfg.User, stagingCfg.Password, true)
@@ -203,7 +206,7 @@ func newEnvWith(t *testing.T, withSaver, withMigrations bool) *env {
 	t.Cleanup(registry.Close)
 
 	deps := web.Deps{
-		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Logger:      slog.New(slog.NewTextHandler(logs, nil)),
 		Guard:       e.guard,
 		Authz:       az,
 		Connections: dbconn.NewService(store, registry, cipher, az),
@@ -355,4 +358,21 @@ func (e *env) scalar(query string, args ...any) string {
 	var out string
 	require.NoError(e.t, e.platform.QueryRow(context.Background(), query, args...).Scan(&out))
 	return out
+}
+
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
 }
