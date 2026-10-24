@@ -164,7 +164,7 @@ func readDollarTag(s string) (string, bool) {
 			return s[:i+1], true
 		}
 		r := rune(s[i])
-		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_') {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
 			return "", false
 		}
 	}
