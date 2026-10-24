@@ -22,6 +22,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbconn"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/explorer"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/httpx"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/migration"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
@@ -96,6 +97,12 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 	connSvc := dbconn.NewService(store, registry, cipher, az)
 	explorerSvc := explorer.NewService(store, registry, az)
 	adminSvc := admin.NewService(pool, az, auditLog)
+	migrationSvc := &migration.Service{
+		Repo:    migration.NewRepository(pool),
+		Targets: dbconn.Targets{Registry: registry},
+		Auth:    az,
+		Audit:   auditLog,
+	}
 
 	r := httpx.NewRouter(logger)
 	r.Route("/api", func(api chi.Router) {
@@ -123,6 +130,7 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 		Connections: connSvc,
 		Explorer:    explorerSvc,
 		Admin:       adminSvc,
+		Migrations:  migrationSvc,
 		Reload:      cfg.Env == "dev",
 		AssetsDir:   "internal/web",
 	})
