@@ -87,9 +87,14 @@ func TestServerWiring(t *testing.T) {
 	rec := anon.do(http.MethodGet, "/api/tidak-ada", "")
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
-	rec = anon.do(http.MethodGet, "/databases/1/schemas/app/tables/books", "")
+	rec = anon.do(http.MethodGet, "/login", "")
 	assert.Equal(t, http.StatusOK, rec.Code)
 	assert.Equal(t, "<div id=root></div>", rec.Body.String())
+	for _, path := range []string{"/databases", "/databases/1/schemas/app/tables/books", "/admin/connections"} {
+		rec = anon.do(http.MethodGet, path, "")
+		assert.Equal(t, http.StatusSeeOther, rec.Code, path)
+		assert.Contains(t, rec.Header().Get("Location"), "/login?next=", path)
+	}
 
 	alice := &client{t: t, h: h}
 	alice.login("alice")

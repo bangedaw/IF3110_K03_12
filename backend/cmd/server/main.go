@@ -94,6 +94,8 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, spa 
 	auditLog := audit.New(pool)
 	az := audit.RecordDenied(authz.NewDBAuthorizer(pool), auditLog)
 	authSvc := auth.NewService(pool, cfg.Session, cfg.CSRFKey, cfg.IsProduction())
+	connSvc := dbconn.NewService(store, registry, cipher, az)
+	explorerSvc := explorer.NewService(store, registry, az)
 
 	r := httpx.NewRouter(logger)
 	r.Route("/api", func(api chi.Router) {
@@ -110,10 +112,23 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, spa 
 		api.Group(func(p chi.Router) {
 			p.Use(authSvc.Middleware)
 			admin.Routes(p, admin.NewService(pool, az, auditLog))
-			dbconn.Routes(p, dbconn.NewService(store, registry, cipher, az))
-			explorer.Routes(p, explorer.NewService(store, registry, az))
+			dbconn.Routes(p, connSvc)
+			explorer.Routes(p, explorerSvc)
 		})
 	})
+	pages, err := web.New(web.Deps{
+		Logger:      logger,
+		Guard:       web.NewAuthGuard(authSvc),
+		Authz:       az,
+		Connections: connSvc,
+		Explorer:    explorerSvc,
+		Reload:      cfg.Env == "dev",
+		AssetsDir:   "internal/web",
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	pages.Mount(r)
 	if h, ok := web.Handler(spa); ok {
 		r.Handle("/*", h)
 	}
