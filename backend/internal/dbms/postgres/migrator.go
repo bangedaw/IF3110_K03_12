@@ -20,7 +20,76 @@ type Migrator struct{ Connector Connector }
 
 type StatementError = dbms.StatementError
 
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
 func (m Migrator) SupportsTransactionalDDL() bool { return true }
+
+func (m Migrator) connectLocked(ctx context.Context, databaseID int64) (*pgx.Conn, func(), error) {
+	if m.Connector == nil {
+		return nil, nil, errors.New("postgres migrator: nil connector")
+	}
+	conn, err := m.Connector.Connect(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connect target: %w", err)
+	}
+	closeConn := func() { _ = conn.Close(context.Background()) }
+	var locked bool
+	if err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1::bigint)`, databaseID).Scan(&locked); err != nil {
+		closeConn()
+		return nil, nil, fmt.Errorf("acquire target advisory lock: %w", err)
+	}
+	if !locked {
+		closeConn()
+		return nil, nil, ErrLockBusy
+	}
+	release := func() {
+		_, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1::bigint)`, databaseID)
+		closeConn()
+	}
+	return conn, release, nil
+}
+
+func setTimeouts(ctx context.Context, tx execer, lockTimeout, statementTimeout time.Duration) error {
+	if lockTimeout <= 0 {
+		lockTimeout = 5 * time.Second
+	}
+	if statementTimeout <= 0 {
+		statementTimeout = 30 * time.Second
+	}
+	if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, lockTimeout.String()); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT set_config('statement_timeout', $1, true)`, statementTimeout.String())
+	return err
+}
+
+func ensureHistory(ctx context.Context, q execer) error {
+	_, err := q.Exec(ctx, `
+        CREATE TABLE IF NOT EXISTS _dbmp_schema_history (
+          run_id BIGINT PRIMARY KEY, migration_id BIGINT NOT NULL, version INTEGER NOT NULL,
+          checksum BYTEA NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          direction TEXT NOT NULL DEFAULT 'up'
+        )`)
+	if err != nil {
+		return fmt.Errorf("create target migration history: %w", err)
+	}
+	_, err = q.Exec(ctx, `ALTER TABLE _dbmp_schema_history ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'up'`)
+	if err != nil {
+		return fmt.Errorf("upgrade target migration history: %w", err)
+	}
+	return nil
+}
+
+func recordHistory(ctx context.Context, q execer, runID, migrationID int64, version int, checksum []byte, direction dbms.Direction) error {
+	_, err := q.Exec(ctx, `INSERT INTO _dbmp_schema_history(run_id,migration_id,version,checksum,direction) VALUES($1,$2,$3,$4,$5)`,
+		runID, migrationID, version, checksum, string(direction))
+	if err != nil {
+		return fmt.Errorf("write target migration history: %w", err)
+	}
+	return nil
+}
 
 func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyResult, error) {
 	if m.Connector == nil {
@@ -30,20 +99,11 @@ func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyRes
 	if err != nil {
 		return nil, err
 	}
-	conn, err := m.Connector.Connect(ctx)
+	conn, release, err := m.connectLocked(ctx, in.DatabaseID)
 	if err != nil {
-		return nil, fmt.Errorf("connect target: %w", err)
+		return nil, err
 	}
-	defer func() { _ = conn.Close(context.Background()) }()
-
-	var locked bool
-	if err = conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1::bigint)`, in.DatabaseID).Scan(&locked); err != nil {
-		return nil, fmt.Errorf("acquire target advisory lock: %w", err)
-	}
-	if !locked {
-		return nil, ErrLockBusy
-	}
-	defer func() { _, _ = conn.Exec(context.Background(), `SELECT pg_advisory_unlock($1::bigint)`, in.DatabaseID) }()
+	defer release()
 
 	stmts, err := sqlsplit.Split(in.SQL, sqlsplit.PostgreSQL)
 	if err != nil {
@@ -66,18 +126,7 @@ func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyRes
 			_ = tx.Rollback(context.Background())
 		}
 	}()
-	lockTimeout := in.LockTimeout
-	if lockTimeout <= 0 {
-		lockTimeout = 5 * time.Second
-	}
-	statementTimeout := in.StatementTimeout
-	if statementTimeout <= 0 {
-		statementTimeout = 30 * time.Second
-	}
-	if _, err = tx.Exec(ctx, `SELECT set_config('lock_timeout', $1, true)`, lockTimeout.String()); err != nil {
-		return nil, err
-	}
-	if _, err = tx.Exec(ctx, `SELECT set_config('statement_timeout', $1, true)`, statementTimeout.String()); err != nil {
+	if err = setTimeouts(ctx, tx, in.LockTimeout, in.StatementTimeout); err != nil {
 		return nil, err
 	}
 
@@ -88,23 +137,11 @@ func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyRes
 		}
 		executed = append(executed, st.SQL)
 	}
-	_, err = tx.Exec(ctx, `
-        CREATE TABLE IF NOT EXISTS _dbmp_schema_history (
-          run_id BIGINT PRIMARY KEY, migration_id BIGINT NOT NULL, version INTEGER NOT NULL,
-          checksum BYTEA NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-          direction TEXT NOT NULL DEFAULT 'up'
-        )`)
-	if err != nil {
-		return nil, fmt.Errorf("create target migration history: %w", err)
+	if err = ensureHistory(ctx, tx); err != nil {
+		return nil, err
 	}
-	_, err = tx.Exec(ctx, `ALTER TABLE _dbmp_schema_history ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'up'`)
-	if err != nil {
-		return nil, fmt.Errorf("upgrade target migration history: %w", err)
-	}
-	_, err = tx.Exec(ctx, `INSERT INTO _dbmp_schema_history(run_id,migration_id,version,checksum,direction) VALUES($1,$2,$3,$4,$5)`,
-		in.RunID, in.MigrationID, in.Version, in.Checksum, string(direction))
-	if err != nil {
-		return nil, fmt.Errorf("write target migration history: %w", err)
+	if err = recordHistory(ctx, tx, in.RunID, in.MigrationID, in.Version, in.Checksum, direction); err != nil {
+		return nil, err
 	}
 	committed = true
 	if err = tx.Commit(ctx); err != nil {

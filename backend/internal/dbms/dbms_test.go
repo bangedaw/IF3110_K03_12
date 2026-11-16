@@ -37,3 +37,22 @@ func TestRetryableSQLState(t *testing.T) {
 		assert.False(t, (&StatementError{SQLState: code}).Retryable(), code)
 	}
 }
+
+func TestBatchProgressState(t *testing.T) {
+	cases := map[BatchState]BatchProgress{
+		BatchPending:           {},
+		BatchPartial:           {BatchesCommitted: 2},
+		BatchCompleted:         {BatchesCommitted: 2, Completed: true},
+		BatchPartiallyReverted: {BatchesCommitted: 2, Completed: true, BatchesReverted: 1},
+		BatchReverted:          {BatchesCommitted: 2, BatchesReverted: 2, RevertCompleted: true},
+	}
+	for want, p := range cases {
+		assert.Equal(t, want, p.State(), want)
+	}
+	assert.Equal(t, BatchCompleted, BatchProgress{Completed: true}.State(), "tabel kosong")
+}
+
+func TestStatementErrorMessageIncludesBatch(t *testing.T) {
+	assert.Equal(t, "batch 6: statement 1 failed: boom", (&StatementError{Batch: 6, Index: 1, Message: "boom"}).Error())
+	assert.Equal(t, "batch 6: commit failed: boom", (&StatementError{Batch: 6, Message: "boom"}).Error())
+}

@@ -6,7 +6,7 @@ GOLANGCI_VERSION     := v2.5.0
 
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: gen lint run build web web-dev dev down seed reseed seed-large bench-update check test test-race
+.PHONY: gen lint run build web web-dev dev down seed reseed seed-large bench-update bench-batch check test test-race
 
 dev:
 	$(COMPOSE) up -d --wait
@@ -31,6 +31,12 @@ seed-large: dev
 
 bench-update:
 	bash deploy/bench-update.sh
+
+LOADTEST_BATCH ?= 50000
+
+bench-batch:
+	cd backend && LOADTEST_DSN='postgres://dbmp:dbmp@localhost:5433/inventory?sslmode=disable' LOADTEST_BATCH=$(LOADTEST_BATCH) \
+		go test -count=1 -run TestLoadtestBatchMigration -v ./internal/dbms/postgres/
 
 check:
 	bash deploy/check.sh

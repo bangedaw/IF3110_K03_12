@@ -75,6 +75,7 @@ oleh `make dev` karena butuh waktu dan ruang disk.
 make seed-large                            # 2.000.000 baris di inventory (port 5433), ±8 detik
 make seed-large LOADTEST_ROWS=500000       # ukuran lain; menjalankan ulang membuat ulang tabel
 make bench-update                          # ukur UPDATE seluruh row tanpa batching (3 kali)
+make bench-batch LOADTEST_BATCH=50000      # query yang sama per batch, lalu dibatalkan per batch
 ```
 
 Tabel `loadtest.transactions` berisi `id` berurutan (kolom cursor batch), `account_id`, `amount`, `status`,
@@ -92,7 +93,44 @@ untuk uji migration per batch dengan query yang sama.
 |---|---|---|---|
 | Intel Core i7-13650HX, RAM 11 GB, PostgreSQL 17.11 (Docker) | 2.000.000 | 361 MB | 17,3 s; 12,8 s; 12,7 s |
 
-Hasil uji migration per batch pada dataset yang sama dicatat setelah mode batch selesai.
+Migration per batch pada dataset dan query yang sama (`… WHERE id > $1 AND id <= $2`), lalu dibatalkan
+per batch dengan `SET amount_cents = NULL`, sehingga dataset kembali seperti semula:
+
+| Ukuran batch | Jumlah batch | Durasi up | Rata-rata per transaction | Durasi pembatalan |
+|---|---|---|---|---|
+| 10.000 | 200 | 13,3 s | 66 ms | 34,7 s |
+| 50.000 | 40 | 13,4 s | 335 ms | 19,9 s |
+| 200.000 | 10 | 12,6 s | 1,3 s | 15,4 s |
+
+Total durasi hampir sama dengan `UPDATE` tunggal, tetapi tiap transaction hanya menahan lock baris selama
+satu batch dan setiap batch langsung committed, sehingga kegagalan di tengah tidak membuang pekerjaan
+sebelumnya. Pembatalan lebih lambat karena berjalan tepat setelah up tanpa `VACUUM`, sehingga setiap
+`UPDATE` harus mencari ruang di antara versi baris lama.
+
+### Mode migration per batch
+
+Mode batch dijalankan oleh `dbms.BatchMigrator` (implementasi PostgreSQL di
+`backend/internal/dbms/postgres/batch.go`). Aturannya:
+
+- SQL up dan down masing-masing satu statement yang memakai `$1` (cursor terakhir, eksklusif) dan `$2`
+  (batas batch, inklusif), misalnya `UPDATE t SET … WHERE id > $1 AND id <= $2`.
+- Kolom batch wajib bertipe integer dan memiliki unique index satu kolom. Kolom tidak unik ditolak karena
+  `LIMIT` dapat memotong nilai duplikat di batas batch sehingga sebagian baris terlewat.
+- Cakupan ditentukan sekali di awal (`min(id) - 1` sampai `max(id)`), sehingga baris yang ditambahkan
+  setelah eksekusi dimulai tidak ikut diproses. Batas tiap batch dihitung di database dengan
+  `ORDER BY id LIMIT n`; data tidak pernah dimuat ke memory aplikasi.
+- Setiap batch berjalan dalam transaction sendiri. Checkpoint (`_dbmp_batch_checkpoint`: execution,
+  nomor batch, rentang cursor, jumlah row) ditulis di database target dalam transaction yang sama dengan
+  perubahan batch, sehingga checkpoint selalu sesuai dengan data yang benar-benar committed.
+- Melanjutkan eksekusi yang gagal memakai execution ID yang sama dan mulai dari checkpoint terakhir.
+  Ukuran batch boleh diubah saat melanjutkan. Batch yang sudah committed tidak diulang, termasuk saat
+  pesan job terkirim dua kali.
+- Pembatalan menjalankan SQL down per batch dari nomor batch terbesar ke terkecil memakai rentang yang
+  tersimpan. Bila gagal di tengah, statusnya `partially_reverted` dan pembatalan dapat dilanjutkan.
+  Eksekusi yang sudah dibatalkan, sebagian atau seluruhnya, tidak dapat dilanjutkan ke depan; forward
+  dilakukan sebagai eksekusi baru. Migration tanpa SQL down ditolak.
+- Selama eksekusi, koneksi worker memegang advisory lock database target sehingga eksekusi lain pada
+  database yang sama ditolak, termasuk di antara commit batch.
 
 ## Build satu binary (demo/production)
 

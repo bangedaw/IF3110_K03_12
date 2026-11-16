@@ -46,6 +46,7 @@ func (d Direction) Normalize() (Direction, error) {
 }
 
 type StatementError struct {
+	Batch    int
 	Index    int
 	SQL      string
 	SQLState string
@@ -57,10 +58,14 @@ type StatementError struct {
 }
 
 func (e *StatementError) Error() string {
-	if e.Index == 0 {
-		return fmt.Sprintf("commit failed: %s", e.Message)
+	prefix := ""
+	if e.Batch > 0 {
+		prefix = fmt.Sprintf("batch %d: ", e.Batch)
 	}
-	return fmt.Sprintf("statement %d failed: %s", e.Index, e.Message)
+	if e.Index == 0 {
+		return fmt.Sprintf("%scommit failed: %s", prefix, e.Message)
+	}
+	return fmt.Sprintf("%sstatement %d failed: %s", prefix, e.Index, e.Message)
 }
 
 func (e *StatementError) Unwrap() error { return e.Err }
