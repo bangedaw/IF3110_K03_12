@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
@@ -73,7 +74,11 @@ func TestServerWiring(t *testing.T) {
 			RotationInterval: 15 * time.Minute, GracePeriod: 30 * time.Second, TouchInterval: time.Minute,
 		},
 	}
-	h, cleanup, err := newHandler(cfg, pool, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	ui := fstest.MapFS{
+		"index.html":      {Data: []byte(`<div id="root"></div>`)},
+		"assets/app-1.js": {Data: []byte("console.log(1)")},
+	}
+	h, cleanup, err := newHandler(cfg, pool, slog.New(slog.NewTextHandler(io.Discard, nil)), ui)
 	require.NoError(t, err)
 	t.Cleanup(cleanup)
 
@@ -85,18 +90,17 @@ func TestServerWiring(t *testing.T) {
 	rec := anon.do(http.MethodGet, "/api/tidak-ada", "")
 	assert.Equal(t, http.StatusNotFound, rec.Code)
 	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
-	rec = anon.do(http.MethodGet, "/login", "")
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Contains(t, rec.Body.String(), `action="/login"`)
-	rec = anon.do(http.MethodGet, "/tidak-ada", "")
-	assert.Equal(t, http.StatusNotFound, rec.Code)
-	assert.Contains(t, rec.Header().Get("Content-Type"), "text/html")
-	assert.Equal(t, http.StatusSeeOther, anon.do(http.MethodGet, "/", "").Code)
-	for _, path := range []string{"/databases", "/databases/1/schemas/app/tables/books", "/admin/connections"} {
+	for _, path := range []string{"/", "/login", "/databases", "/databases/1/schemas/app/tables/books", "/admin/connections", "/tidak-ada"} {
 		rec = anon.do(http.MethodGet, path, "")
-		assert.Equal(t, http.StatusSeeOther, rec.Code, path)
-		assert.Contains(t, rec.Header().Get("Location"), "/login?next=", path)
+		assert.Equal(t, http.StatusOK, rec.Code, path)
+		assert.Equal(t, `<div id="root"></div>`, rec.Body.String(), path)
+		assert.Equal(t, "no-cache", rec.Header().Get("Cache-Control"), path)
 	}
+	rec = anon.do(http.MethodGet, "/assets/app-1.js", "")
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "console.log(1)", rec.Body.String())
+	assert.Equal(t, http.StatusNotFound, anon.do(http.MethodGet, "/assets/hilang.js", "").Code)
+	assert.Equal(t, http.StatusMethodNotAllowed, anon.do(http.MethodPost, "/login", "").Code)
 
 	alice := &client{t: t, h: h}
 	alice.login("alice")
@@ -117,4 +121,22 @@ func TestServerWiring(t *testing.T) {
 	assert.Contains(t, rec.Body.String(), "CSRF_INVALID")
 	admin.csrf = csrf
 	assert.NotEqual(t, http.StatusForbidden, admin.do(http.MethodPost, "/api/admin/databases", body).Code)
+}
+
+func TestServerWithoutFrontendBuildServesOnlyAPI(t *testing.T) {
+	pool := testutil.NewPlatformDB(t)
+	t.Cleanup(pool.Close)
+	cfg := config.Config{
+		SecretKey: "REVWLU9OTFktREVWLU9OTFktREVWLU9OTFktREVWLU8=",
+		CSRFKey:   "test-csrf-key",
+	}
+	h, cleanup, err := newHandler(cfg, pool, slog.New(slog.NewTextHandler(io.Discard, nil)), fstest.MapFS{".gitkeep": {}})
+	require.NoError(t, err)
+	t.Cleanup(cleanup)
+
+	anon := &client{t: t, h: h}
+	assert.Equal(t, http.StatusOK, anon.do(http.MethodGet, "/api/healthz", "").Code)
+	rec := anon.do(http.MethodGet, "/databases", "")
+	assert.Equal(t, http.StatusNotFound, rec.Code)
+	assert.Equal(t, "application/problem+json", rec.Header().Get("Content-Type"))
 }
