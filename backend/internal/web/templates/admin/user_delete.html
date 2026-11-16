@@ -1,0 +1,13 @@
+{{define "title"}}Hapus pengguna{{end}}
+{{define "content"}}
+<div class="page-head"><h1>Hapus pengguna</h1></div>
+<form class="card" method="post" action="/admin/users/{{.Data.User.Id}}/delete">
+  {{template "csrf" .}}
+  <p>Hapus pengguna <strong>{{.Data.User.Username}}</strong>?</p>
+  <div class="notice notice-warning">Keanggotaan group dan session pengguna ikut terhapus. Aksi ini tidak dapat dibatalkan.</div>
+  <div class="actions">
+    <button class="btn btn-danger" type="submit">Ya, hapus</button>
+    <a class="btn btn-secondary" href="/admin/users/{{.Data.User.Id}}">Batal</a>
+  </div>
+</form>
+{{end}}

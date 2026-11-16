@@ -1,0 +1,21 @@
+{{define "title"}}{{.Data.Header.DB.Name}}{{end}}
+{{define "content"}}
+{{template "dbheader" .}}
+<div class="layout-split">
+  <aside>{{template "explorer_sidebar" .Data}}</aside>
+  <section>
+    {{if .Data.Active}}<h2>Tabel di schema {{.Data.Active}}</h2>
+    {{if .Data.Tables}}
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Nama</th><th>Jenis</th><th class="right">Estimasi baris</th></tr></thead>
+      <tbody>
+      {{range .Data.Tables}}<tr><td><a href="{{.URL}}">{{.Name}}</a></td><td>{{.Kind}}</td><td class="right">{{.Estimate}}</td></tr>{{end}}
+      </tbody>
+    </table>
+    </div>
+    {{else}}<p class="empty">Tidak ada tabel pada schema ini.</p>{{end}}
+    {{else}}<p class="empty">Database ini tidak memiliki schema.</p>{{end}}
+  </section>
+</div>
+{{end}}

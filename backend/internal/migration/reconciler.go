@@ -1,44 +1,52 @@
 package migration
 
-import "context"
+import (
+	"context"
+	"log/slog"
+)
+
+const reconciledFailure = "server berhenti sebelum eksekusi selesai; perubahan tidak ditemukan di database target sehingga dianggap di-rollback"
 
 type ReconcileRepository interface {
-	StaleRunning(ctx context.Context, olderThanSeconds int) ([]Run, error)
-	MarkReconciled(ctx context.Context, runID int64, status Status, version *int, reason string) error
+	RunningRuns(ctx context.Context) ([]Run, error)
+	FinishRun(ctx context.Context, runID int64, status Status, version *int, errCode, errMessage string, failedIndex *int) (*Run, error)
 }
-type TargetHistory interface {
-	HasCommittedRun(ctx context.Context, databaseID, runID int64) (version int, checksum string, found bool, err error)
-}
+
 type Reconciler struct {
-	Repo              ReconcileRepository
-	Targets           TargetHistory
-	StaleAfterSeconds int
+	Repo    ReconcileRepository
+	Targets TargetRegistry
+	Logger  *slog.Logger
 }
 
 func (r Reconciler) Reconcile(ctx context.Context) error {
-	stale := r.StaleAfterSeconds
-	if stale <= 0 {
-		stale = 60
+	logger := r.Logger
+	if logger == nil {
+		logger = slog.Default()
 	}
-	runs, err := r.Repo.StaleRunning(ctx, stale)
+	runs, err := r.Repo.RunningRuns(ctx)
 	if err != nil {
 		return err
 	}
 	for _, run := range runs {
-		version, checksum, found, checkErr := r.Targets.HasCommittedRun(ctx, run.DatabaseID, run.ID)
-		if checkErr != nil {
+		target, err := r.Targets.Get(ctx, run.DatabaseID)
+		if err != nil {
+			logger.WarnContext(ctx, "reconcile: target tidak terjangkau, run dibiarkan running", "run_id", run.ID, "err", err)
+			continue
+		}
+		version, found, err := target.CommittedRun(ctx, run.ID)
+		if err != nil {
+			logger.WarnContext(ctx, "reconcile: riwayat target tidak terbaca, run dibiarkan running", "run_id", run.ID, "err", err)
 			continue
 		}
 		if found {
-			_ = checksum
-			if err = r.Repo.MarkReconciled(ctx, run.ID, RunSucceeded, &version, "target history confirms commit"); err != nil {
-				return err
-			}
+			_, err = r.Repo.FinishRun(ctx, run.ID, RunSucceeded, &version, "", "", nil)
 		} else {
-			if err = r.Repo.MarkReconciled(ctx, run.ID, RunFailed, nil, "no committed target history row found after stale running state"); err != nil {
-				return err
-			}
+			_, err = r.Repo.FinishRun(ctx, run.ID, RunFailed, nil, "RECONCILED", reconciledFailure, nil)
 		}
+		if err != nil {
+			return err
+		}
+		logger.InfoContext(ctx, "reconcile: run diselesaikan", "run_id", run.ID, "committed", found)
 	}
 	return nil
 }

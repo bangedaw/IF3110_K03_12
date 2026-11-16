@@ -1,0 +1,1 @@
+{{define "flash"}}{{if .Flash}}<div class="flash flash-{{.Flash.Kind}}" role="{{if eq .Flash.Kind "error"}}alert{{else}}status{{end}}">{{.Flash.Message}}</div>{{end}}{{end}}

@@ -1,0 +1,13 @@
+{{define "title"}}Hapus group{{end}}
+{{define "content"}}
+<div class="page-head"><h1>Hapus group</h1></div>
+<form class="card" method="post" action="/admin/groups/{{.Data.Group.Id}}/delete">
+  {{template "csrf" .}}
+  <p>Hapus group <strong>{{.Data.Group.Name}}</strong> beserta {{len .Data.Group.Members}} keanggotaan?</p>
+  <div class="notice notice-warning">Seluruh akses database lewat group ini ikut hilang. Aksi ini tidak dapat dibatalkan.</div>
+  <div class="actions">
+    <button class="btn btn-danger" type="submit">Ya, hapus</button>
+    <a class="btn btn-secondary" href="/admin/groups/{{.Data.Group.Id}}">Batal</a>
+  </div>
+</form>
+{{end}}

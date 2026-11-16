@@ -1,0 +1,27 @@
+{{define "title"}}Pengguna{{end}}
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Pengguna</h1>
+    <p class="muted">Akun yang dapat masuk ke platform. Akses database diberikan lewat group.</p>
+  </div>
+  <a class="btn" href="/admin/users/new">Tambah pengguna</a>
+</div>
+{{if .Data.Items}}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Username</th><th>Nama</th><th>Peran</th><th>Status</th><th class="right">Aksi</th></tr></thead>
+  <tbody>
+  {{range .Data.Items}}<tr>
+    <td><strong>{{.Username}}</strong></td>
+    <td>{{.DisplayName}}</td>
+    <td>{{if .IsPlatformAdmin}}<span class="badge badge-success">Platform Admin</span>{{else}}<span class="badge">Pengguna</span>{{end}}</td>
+    <td>{{if .IsActive}}<span class="badge badge-success">Aktif</span>{{else}}<span class="badge">Nonaktif</span>{{end}}</td>
+    <td class="right"><a class="btn btn-secondary btn-sm" href="/admin/users/{{.Id}}">Kelola</a></td>
+  </tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "pagination" .Data.Pager}}
+{{else}}<p class="empty">Belum ada pengguna.</p>{{end}}
+{{end}}

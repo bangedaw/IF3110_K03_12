@@ -1,0 +1,11 @@
+{{define "explorer_sidebar"}}<nav class="tree" aria-label="Schema">
+  {{range .Schemas}}<div class="tree-schema">
+    {{if .Active}}<strong class="tree-name">{{.Name}}</strong>
+    <ul>
+      {{range .Tables}}<li><a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Name}}</a>{{if .IsView}} <span class="muted">view</span>{{end}}</li>
+      {{else}}<li class="muted">Tidak ada tabel</li>
+      {{end}}
+    </ul>
+    {{else}}<a class="tree-name" href="{{.URL}}">{{.Name}}</a>{{end}}
+  </div>{{else}}<p class="muted">Tidak ada schema.</p>{{end}}
+</nav>{{end}}

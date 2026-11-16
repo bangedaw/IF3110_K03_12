@@ -1,0 +1,21 @@
+{{define "title"}}Eksekusi migration · {{.Data.Header.DB.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data}}
+{{template "dbheader" .}}
+<h2>Eksekusi #{{$d.M.ID}} {{$d.M.Title}}</h2>
+<form class="card" method="post" action="{{$d.BaseURL}}/execute">
+  {{template "csrf" .}}
+  <input type="hidden" name="revision" value="{{$d.M.Revision}}">
+  <p>SQL berikut akan dijalankan pada <strong>{{$d.Header.DB.Name}}</strong> sebagai versi <strong>{{$d.Head}}</strong> + 1 dalam satu transaction: di-commit bila semua statement berhasil, di-rollback seluruhnya bila ada yang gagal.</p>
+  <pre class="mig-sql">{{$d.M.SQL}}</pre>
+  {{if $d.IsMySQL}}<div class="notice notice-warning">MySQL: statement DDL melakukan implicit commit. Bila gagal di tengah, perubahan DDL sebelumnya bisa tetap tertinggal.</div>{{end}}
+  {{if $d.HeadChanged}}<div class="notice notice-warning">
+    Versi database berubah dari {{$d.M.BaseVersion}} menjadi {{$d.Head}} sejak draft ini dibuat. Pastikan SQL masih sesuai.
+    <p class="check"><input id="ack" name="acknowledgeHeadChanged" type="checkbox"><label for="ack">Saya sudah meninjau ulang dan tetap ingin menjalankan</label></p>
+  </div>{{end}}
+  <div class="actions">
+    <button class="btn" type="submit">Jalankan migration</button>
+    <a class="btn btn-secondary" href="{{$d.BaseURL}}">Batal</a>
+  </div>
+</form>
+{{end}}

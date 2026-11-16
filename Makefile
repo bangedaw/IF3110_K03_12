@@ -6,7 +6,7 @@ GOLANGCI_VERSION     := v2.5.0
 
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: gen lint run build dev down seed reseed check test test-race
+.PHONY: gen lint run build web web-dev dev down seed reseed seed-large bench-update bench-batch check test test-race
 
 dev:
 	$(COMPOSE) up -d --wait
@@ -23,6 +23,20 @@ reseed:
 	$(COMPOSE) down -v
 	$(COMPOSE) up -d --wait
 	bash deploy/check.sh
+
+LOADTEST_ROWS ?= 2000000
+
+seed-large: dev
+	$(COMPOSE) exec -T target-pg-1 psql -U dbmp -d inventory -v rows=$(LOADTEST_ROWS) < deploy/seed/pg1_loadtest.sql
+
+bench-update:
+	bash deploy/bench-update.sh
+
+LOADTEST_BATCH ?= 50000
+
+bench-batch:
+	cd backend && LOADTEST_DSN='postgres://dbmp:dbmp@localhost:5433/inventory?sslmode=disable' LOADTEST_BATCH=$(LOADTEST_BATCH) \
+		go test -count=1 -run TestLoadtestBatchMigration -v ./internal/dbms/postgres/
 
 check:
 	bash deploy/check.sh
@@ -44,8 +58,13 @@ lint:
 run:
 	cd backend && go run ./cmd/server
 
-build:
+web:
 	cd frontend && npm ci && npm run build
-	find backend/internal/web/dist -mindepth 1 ! -name .gitkeep -delete
-	cp -r frontend/dist/. backend/internal/web/dist/
+	find backend/internal/spa/dist -mindepth 1 ! -name .gitkeep -delete
+	cp -r frontend/dist/. backend/internal/spa/dist/
+
+web-dev:
+	cd frontend && npm run dev
+
+build: web
 	cd backend && go build -o ../bin/dbmp ./cmd/server && go build -o ../bin/dbmpctl ./cmd/dbmpctl

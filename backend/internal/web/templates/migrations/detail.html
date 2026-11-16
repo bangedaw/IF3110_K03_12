@@ -1,0 +1,49 @@
+{{define "title"}}{{.Data.M.Title}} · {{.Data.Header.DB.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data}}
+{{template "dbheader" .}}
+<div class="page-head">
+  <div>
+    <h2>#{{$d.M.ID}} {{$d.M.Title}}</h2>
+    <p class="muted">
+      {{if eq $d.M.Status "applied"}}<span class="badge badge-success">applied · versi {{$d.M.Version}}</span> pada {{with $d.M.AppliedAt}}{{fmtTime .}}{{end}}
+      {{else}}<span class="badge">draft</span> · revisi {{$d.M.Revision}} · dibuat saat versi {{$d.M.BaseVersion}}{{end}}
+    </p>
+  </div>
+  {{if $d.CanEdit}}<div class="actions">
+    <a class="btn" href="{{$d.BaseURL}}/execute">Eksekusi</a>
+    <a class="btn btn-secondary" href="{{$d.BaseURL}}/explain">EXPLAIN</a>
+    <a class="btn btn-danger" href="{{$d.BaseURL}}/delete">Hapus</a>
+  </div>{{end}}
+</div>
+{{if $d.M.Description}}<p>{{$d.M.Description}}</p>{{end}}
+
+{{if $d.CanEdit}}
+<form class="card" method="post" action="{{$d.Form.Action}}" novalidate>
+  {{template "csrf" .}}
+  {{template "mig_fields" $d.Form}}
+  <div class="actions"><button class="btn" type="submit">Simpan perubahan</button></div>
+</form>
+{{else}}
+<div class="card"><pre class="mig-sql">{{$d.M.SQL}}</pre></div>
+{{end}}
+
+<h3>Riwayat eksekusi</h3>
+{{if $d.Runs}}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Run</th><th>Status</th><th>Pelaksana</th><th>Mulai</th><th>Selesai</th><th>Keterangan</th></tr></thead>
+  <tbody>
+  {{range $d.Runs}}<tr>
+    <td>{{.ID}}</td>
+    <td>{{template "mig_run_status" .}}</td>
+    <td>{{.ExecutedByName}}</td>
+    <td>{{fmtTime .StartedAt}}</td>
+    <td>{{with .FinishedAt}}{{fmtTime .}}{{else}}-{{end}}</td>
+    <td>{{if .ErrorMessage}}{{with .FailedStatementIndex}}Statement {{.}}: {{end}}{{.ErrorMessage}}{{else if .Version}}versi {{.Version}}{{end}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p class="empty">Migration ini belum pernah dijalankan.</p>{{end}}
+{{end}}

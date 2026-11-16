@@ -3,12 +3,20 @@
 Keputusan yang diminta spesifikasi untuk ditentukan dan didokumentasikan tim, beserta cara
 implementasinya. Arsitektur dan alur request ada di [architecture.md](architecture.md).
 
-## 1. Frontend: React SPA
+## 1. Frontend: server-rendered, bukan SPA
 
 Spesifikasi: *"Frontend dibebaskan. Tampilan dapat dibuat menggunakan Go template (bukan SPA)."*
-Tafsiran yang dipakai: frontend bebas; Go template hanya salah satu opsi. Frontend dibuat sebagai
-React + TypeScript SPA yang memanggil backend Go lewat JSON API. Untuk demo/production, hasil build SPA
-di-embed ke binary Go sehingga SPA dan API berada di satu origin (tanpa CORS).
+Kalimat ini ditanyakan ke asisten lewat Q&A. Jawabannya: *"untuk milestone 1, frontendnya tidak SPA,
+go templating disitu jadi contohnya."* Karena itu tampilan dirender di server dengan `html/template`:
+
+- Setiap halaman adalah route `GET` biasa; setiap aksi adalah form `POST` yang diakhiri redirect 303
+  (Post/Redirect/Get). Tidak ada routing atau rendering sisi klien, dan tidak ada JavaScript.
+- Template dan aset statis di-embed ke binary (`embed.FS`), sehingga halaman dan API berada di satu origin.
+- Layer service tidak tahu HTTP; handler halaman dan handler JSON memanggil service yang sama.
+- Kekurangan yang disengaja: editor SQL berupa `<textarea>` tanpa syntax highlighting, dan setiap aksi
+  memuat ulang halaman.
+- JSON API di `/api` (dengan kontrak `api/openapi.yaml`) tetap tersedia dan teruji, tetapi tidak dipakai
+  oleh halaman.
 
 ## 2. Authentication
 
@@ -47,7 +55,8 @@ session tidak langsung memberi akses.
 `last_seen_at`, `last_rotated_at`, `rotate_required`, dan `revoked_at`. Setiap identifier
 (`session_tokens`) milik satu family; rotasi menambah token baru di family yang sama.
 
-**Pemeriksaan setiap request** (middleware `auth.Middleware`), ditolak dengan 401 jika:
+**Pemeriksaan setiap request** (`auth.Middleware` untuk JSON API, `auth.WebAuthenticate` untuk halaman),
+ditolak jika (JSON API: 401; halaman: redirect 303 ke `/login?next=...`, dengan `reason=expired` bila sesi berakhir):
 family di-revoke; absolute expiration lewat (`SESSION_EXPIRED`); idle timeout lewat (`SESSION_EXPIRED`);
 user dinonaktifkan (family sekaligus di-revoke); atau token sudah digantikan dan grace period-nya lewat.
 
@@ -84,11 +93,14 @@ Tiga lapis:
 1. Cookie `SameSite=Lax`: browser tidak mengirim cookie session pada POST lintas situs.
 2. `http.CrossOriginProtection` (stdlib Go ≥ 1.25) di semua route, termasuk `/api/auth/login`: request
    POST/PUT/PATCH/DELETE lintas origin (berdasarkan `Sec-Fetch-Site`/`Origin`) ditolak 403 `CSRF_INVALID`.
-3. Synchronizer token `base64url(HMAC-SHA256(CSRF_KEY, family_id))`, dikembalikan di body
-   `/api/auth/login` dan `/api/auth/me`. Setiap request non-GET ke route yang dilindungi wajib mengirim
-   header `X-CSRF-Token`; dibandingkan constant-time. Token terikat pada family sehingga tetap berlaku
-   setelah rotasi session dan tidak perlu disimpan. Frontend menyimpannya di memori (bukan
-   `localStorage`) dan menambahkannya otomatis lewat interceptor `fetch`.
+3. Synchronizer token `base64url(HMAC-SHA256(CSRF_KEY, family_id))`. Pada halaman, token ditanam sebagai
+   field tersembunyi `_csrf` di setiap form POST dan dibandingkan constant-time; token salah atau kosong
+   menghasilkan 403. Pada JSON API token dikembalikan di body `/api/auth/login` dan `/api/auth/me` dan
+   dikirim lewat header `X-CSRF-Token`. Token terikat pada family sehingga tetap berlaku setelah rotasi
+   session dan tidak perlu disimpan.
+
+Form login tidak memakai token (belum ada session); ia dilindungi `SameSite=Lax` dan
+`CrossOriginProtection`, dan parameter `next` hanya menerima path lokal.
 
 ## 5. Authorization
 
@@ -100,7 +112,8 @@ Semua pemeriksaan hak akses ada di backend, terpusat di `backend/internal/authz`
 - `db.go`: menghitung level efektif dari database lalu memutuskan lewat `policy.go`.
 
 Service setiap domain memanggil `Authorize` sebelum bekerja; middleware hanya memastikan request sudah
-login. Menyembunyikan tombol di UI hanya kenyamanan, bukan kontrol akses. Matriks lengkap diuji di
+login. Menyembunyikan tombol di template hanya kenyamanan, bukan kontrol akses; POST langsung tetap
+ditolak 403. Matriks lengkap diuji di
 `policy_test.go`.
 
 ## 6. Akses efektif multi-group
@@ -138,7 +151,25 @@ karena level dihitung ulang setiap kali (tanpa cache).
   lubang. Migration yang sudah applied tidak bisa diubah; perbaikan lewat migration baru.
 - Setiap percobaan eksekusi dicatat sebagai *run*: SQL yang dijalankan, pelaksana, waktu, status, error.
 - Eksekusi berjalan dalam transaction: commit jika semua statement berhasil, rollback jika ada yang gagal.
-  Hanya satu eksekusi per database pada satu waktu.
+  Run yang gagal mencatat nomor statement yang gagal beserta pesan error database.
+- Hanya satu eksekusi per database pada satu waktu: advisory lock di platform DB (eksekusi kedua langsung
+  ditolak 409) dan di database target.
+- Jika versi database berubah sejak draft dibuat (`base_version` ≠ versi saat ini), eksekusi ditolak 409
+  sampai pengguna mengonfirmasi bahwa SQL sudah ditinjau ulang.
+- Statement pengendali transaksi (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`) dan statement yang tidak
+  boleh berada dalam transaction PostgreSQL (`VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`)
+  ditolak saat draft disimpan (422).
+- Script yang kosong atau hanya berisi komentar/spasi ditolak (422) karena tidak ada statement yang dijalankan.
+- Database target menyimpan tabel `_dbmp_schema_history` yang ditulis dalam transaction yang sama dengan
+  perubahan migration. Saat server start (sebelum menerima request), *reconciler* memeriksa run yang masih
+  berstatus `running` dari proses sebelumnya: bila tercatat di `_dbmp_schema_history`, run ditandai
+  berhasil dan migration diberi versinya; bila tidak, run ditandai gagal (`RECONCILED`). Run pada target
+  yang tidak terjangkau dibiarkan `running` dan diperiksa lagi pada start berikutnya.
+- Setelah eksekusi berhasil, snapshot schema disimpan dengan referensi ke run-nya (dipakai schema diff).
+- EXPLAIN / EXPLAIN ANALYZE (butuh `edit`): PostgreSQL menjalankan seluruh script dalam transaction yang
+  selalu di-rollback; DDL dijalankan hanya sebagai konteks. Plan ditampilkan sebagai pohon node (jenis
+  node, relasi, index, kondisi join, cost, estimasi vs aktual baris, waktu, loop), dengan penanda node
+  termahal dan Seq Scan pada tabel besar. Nilai sequence yang terpakai saat ANALYZE tidak ikut di-rollback.
 
 ## 9. Kredensial database target
 
@@ -154,11 +185,26 @@ berhasil, dan setiap penolakan otorisasi dari domain mana pun (aksi + database).
 berisi password, hash, atau token. Penulisan audit bersifat best-effort: kegagalan menulis audit dicatat
 di log server dan tidak menggagalkan request.
 
-## 11. Konvensi API
+## 11. Konvensi halaman dan API
+
+**Halaman (utama).**
 
 | Konvensi | Keputusan |
 |---|---|
-| Kontrak | `api/openapi.yaml` (OpenAPI 3.0.3) sumber kebenaran; `make gen` menghasilkan tipe Go dan TypeScript |
+| Metode | `GET` membaca, `POST` untuk semua mutasi (form HTML hanya mendukung dua metode ini) |
+| Setelah mutasi | redirect 303 dengan pesan flash (cookie sekali-baca) |
+| Validasi gagal | 422, form yang sama dirender ulang dengan pesan per field; password tidak diisi ulang |
+| Tidak login / sesi berakhir | 303 ke `/login?next=...` |
+| Tidak berhak / konflik / tidak ada / DB target mati | 403 / 409 / 404 / 503 (halaman error, bukan 500) |
+| Aksi destruktif | halaman konfirmasi (`GET`) lalu `POST` |
+| Pagination | `?limit=&offset=` (default 50, maks 200); sort `?orderBy=&orderDir=` |
+| Escaping | `html/template`; CSP `default-src 'self'` |
+
+**JSON API (`/api`, tidak dipakai halaman).**
+
+| Konvensi | Keputusan |
+|---|---|
+| Kontrak | `api/openapi.yaml` (OpenAPI 3.0.3); `make gen` menghasilkan tipe Go |
 | Format | prefix `/api`, JSON `camelCase`, waktu ISO 8601 UTC, ID number (int64) |
 | Error | RFC 9457 Problem Details `{type, title, status, detail, code, errors?}`, `application/problem+json` |
 | Pagination | `?limit=&offset=` (default 50, maks 200) → `{items, limit, offset, total}` |
@@ -173,3 +219,47 @@ di log server dan tidak menggagalkan request.
 | `VALIDATION_FAILED`, `MIGRATION_FAILED` | 422 |
 | `DB_UNREACHABLE` | 503 |
 | error tak terduga | 500 `INTERNAL`; detail asli hanya di log server |
+
+## 12. Dukungan MySQL
+
+- Di MySQL, "schema" sama dengan nama database yang terhubung, jadi explorer menampilkan satu schema.
+  Introspeksi memakai `information_schema`; viewer memakai `START TRANSACTION READ ONLY`.
+- DDL MySQL melakukan *implicit commit* sehingga tidak bisa di-rollback. Migration MySQL bersifat
+  non-transaksional untuk DDL: kegagalan di tengah script dapat meninggalkan perubahan DDL parsial, dan
+  halaman eksekusi memperingatkan hal ini sebelum dijalankan. Statement DML tetap dijalankan dalam
+  transaction sehingga migration yang hanya berisi DML di-rollback penuh saat gagal.
+- EXPLAIN MySQL tidak pernah menjalankan DDL (DDL ditandai "tidak dijalankan"), dan EXPLAIN ANALYZE
+  ditolak untuk script yang mengandung DDL. Plan MySQL ditampilkan sebagai JSON (atau teks pohon untuk
+  ANALYZE).
+
+## 13. Schema diff
+
+- Pembanding: database lain yang terdaftar (butuh `view` di kedua sisi) atau snapshot tersimpan dari
+  database yang sama. Hanya arah `toTarget`: SQL yang dihasilkan membuat database yang dipilih menyamai
+  pembanding. Halaman hanya menawarkan pembanding dengan jenis DBMS yang sama karena SQL dihasilkan per dialek.
+- Menyimpan hasil sebagai draft migration butuh `edit` pada database yang diubah.
+- Rename tidak terdeteksi otomatis: muncul sebagai drop + add dan ditandai **destructive**. Perubahan tipe
+  kolom bisa gagal jika data tidak kompatibel. SQL hanyalah kandidat; pengguna meninjau dan dapat
+  mengubahnya di `<textarea>` sebelum disimpan.
+- Ekspresi default dinormalisasi sebelum dibandingkan (cast PostgreSQL dibuang, `now()` disamakan dengan
+  `CURRENT_TIMESTAMP`) agar perbedaan penulisan tidak dianggap perubahan.
+- Urutan SQL aman: drop constraint → drop index → drop/alter kolom → drop tabel → create tabel → add kolom
+  → add constraint dan index.
+
+## 14. Approval migration (Milestone 2)
+
+Spesifikasi: setiap perubahan database, termasuk rollback dan forward, wajib disetujui leader setiap
+group yang punya akses ke database tersebut, baik View Only maupun View + Edit.
+
+- **Group tidak boleh tanpa leader.** Leader wajib diisi saat group dibuat dan harus anggota group itu.
+  Leader tidak bisa dikeluarkan dari group, dihapus, atau dinonaktifkan sebelum penggantinya ditunjuk.
+- **Fail closed.** Group dari Milestone 1 yang belum punya leader tidak bisa diberi akses baru, dan
+  migration pada database yang diaksesnya tertahan di Pending Review sampai admin menunjuk leader.
+  Approval tidak pernah dilewati diam-diam.
+- **Platform Admin tidak ikut menyetujui karena jabatannya.** Admin hanya menyetujui jika ia leader salah
+  satu group yang punya akses. Ini sejalan dengan bagian 7: Platform Admin tidak otomatis punya akses data.
+- **Self-approval diperbolehkan**, dan satu user yang memimpin beberapa group cukup menyetujui sekali
+  (jawaban Sheets Q&A no. 4.1).
+- **Eksekusi tidak otomatis.** Setelah semua approval terkumpul, status menjadi Approved dan job baru
+  dibuat saat pengguna menekan eksekusi (jawaban Sheets Q&A no. 4.7). Approval melekat pada migration;
+  retry tidak butuh approval ulang (no. 4.8).

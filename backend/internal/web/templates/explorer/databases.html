@@ -1,0 +1,18 @@
+{{define "title"}}Database{{end}}
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Database</h1>
+    <p class="muted">Database yang dapat Anda akses melalui keanggotaan group.</p>
+  </div>
+</div>
+{{if .Data.Items}}
+<div class="card-grid">
+  {{range .Data.Items}}<a class="card card-link" href="/databases/{{.ID}}">
+    <strong>{{.Name}}</strong>
+    <p class="muted">{{kindLabel .Kind}}</p>
+    <span class="badge{{if isEdit .Level}} badge-success{{end}}">{{levelLabel .Level}}</span>
+  </a>{{end}}
+</div>
+{{else}}<p class="empty">Anda belum memiliki akses ke database mana pun. Minta Platform Admin menambahkan group Anda ke sebuah database.</p>{{end}}
+{{end}}

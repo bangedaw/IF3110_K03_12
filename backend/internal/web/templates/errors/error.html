@@ -1,0 +1,8 @@
+{{define "title"}}{{.Data.Title}}{{end}}
+{{define "content"}}<section class="error-page">
+  <p class="error-status">{{.Data.Status}}</p>
+  <h1>{{.Data.Title}}</h1>
+  <p>{{.Data.Message}}</p>
+  {{if .Data.RequestID}}<p class="muted">ID permintaan: <code>{{.Data.RequestID}}</code></p>{{end}}
+  <p><a class="btn btn-secondary" href="/databases">Kembali ke daftar database</a></p>
+</section>{{end}}

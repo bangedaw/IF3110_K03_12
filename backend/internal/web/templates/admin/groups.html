@@ -1,0 +1,25 @@
+{{define "title"}}Group{{end}}
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Group</h1>
+    <p class="muted">Akses database diberikan kepada group, bukan langsung kepada pengguna.</p>
+  </div>
+  <a class="btn" href="/admin/groups/new">Tambah group</a>
+</div>
+{{if .Data.Items}}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Nama</th><th>Deskripsi</th><th class="right">Aksi</th></tr></thead>
+  <tbody>
+  {{range .Data.Items}}<tr>
+    <td><strong>{{.Name}}</strong></td>
+    <td>{{.Description}}</td>
+    <td class="right"><a class="btn btn-secondary btn-sm" href="/admin/groups/{{.Id}}">Kelola</a></td>
+  </tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{template "pagination" .Data.Pager}}
+{{else}}<p class="empty">Belum ada group.</p>{{end}}
+{{end}}

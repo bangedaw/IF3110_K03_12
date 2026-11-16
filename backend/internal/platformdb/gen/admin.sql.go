@@ -48,7 +48,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 }
 
 const createGroup = `-- name: CreateGroup :one
-INSERT INTO groups (name, description) VALUES ($1, $2) RETURNING id, name, description, created_at
+INSERT INTO groups (name, description) VALUES ($1, $2) RETURNING id, name, description, created_at, leader_user_id
 `
 
 type CreateGroupParams struct {
@@ -64,6 +64,7 @@ func (q *Queries) CreateGroup(ctx context.Context, arg CreateGroupParams) (Group
 		&i.Name,
 		&i.Description,
 		&i.CreatedAt,
+		&i.LeaderUserID,
 	)
 	return i, err
 }
@@ -144,7 +145,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) (int64, error) {
 }
 
 const getGroupByID = `-- name: GetGroupByID :one
-SELECT id, name, description, created_at FROM groups WHERE id = $1
+SELECT id, name, description, created_at, leader_user_id FROM groups WHERE id = $1
 `
 
 func (q *Queries) GetGroupByID(ctx context.Context, id int64) (Group, error) {
@@ -155,6 +156,7 @@ func (q *Queries) GetGroupByID(ctx context.Context, id int64) (Group, error) {
 		&i.Name,
 		&i.Description,
 		&i.CreatedAt,
+		&i.LeaderUserID,
 	)
 	return i, err
 }
@@ -247,7 +249,7 @@ func (q *Queries) ListGroupMembers(ctx context.Context, groupID int64) ([]User, 
 }
 
 const listGroups = `-- name: ListGroups :many
-SELECT id, name, description, created_at FROM groups ORDER BY id LIMIT $2 OFFSET $1
+SELECT id, name, description, created_at, leader_user_id FROM groups ORDER BY id LIMIT $2 OFFSET $1
 `
 
 type ListGroupsParams struct {
@@ -269,6 +271,7 @@ func (q *Queries) ListGroups(ctx context.Context, arg ListGroupsParams) ([]Group
 			&i.Name,
 			&i.Description,
 			&i.CreatedAt,
+			&i.LeaderUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -361,7 +364,7 @@ UPDATE groups
 SET name        = COALESCE($1, name),
     description = COALESCE($2, description)
 WHERE id = $3
-RETURNING id, name, description, created_at
+RETURNING id, name, description, created_at, leader_user_id
 `
 
 type UpdateGroupParams struct {
@@ -378,6 +381,7 @@ func (q *Queries) UpdateGroup(ctx context.Context, arg UpdateGroupParams) (Group
 		&i.Name,
 		&i.Description,
 		&i.CreatedAt,
+		&i.LeaderUserID,
 	)
 	return i, err
 }

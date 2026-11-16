@@ -4,10 +4,24 @@ linters:
     - gosec
     - bodyclose
     - errorlint
+  settings:
+    gosec:
+      excludes:
+        - G104
+        - G115
+    errcheck:
+      exclude-functions:
+        - (*database/sql.Rows).Close
   exclusions:
     paths:
       - internal/apigen
       - internal/platformdb/gen
+    rules:
+      - path: _test\.go
+        linters:
+          - bodyclose
+          - errcheck
+          - gosec
 formatters:
   enable:
     - gofmt

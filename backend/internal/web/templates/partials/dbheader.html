@@ -1,0 +1,10 @@
+{{define "dbheader"}}{{with .Data.Header}}<div class="page-head">
+  <div>
+    <h1>{{.DB.Name}}</h1>
+    <p class="muted"><a href="/databases">Database</a> · {{kindLabel .DB.Kind}} · <span class="mono">{{.DB.Host}}:{{.DB.Port}}/{{.DB.DatabaseName}}</span></p>
+  </div>
+  <span class="badge{{if isEdit .DB.Level}} badge-success{{end}}">{{levelLabel .DB.Level}}</span>
+</div>
+<nav class="tabs" aria-label="Bagian database">
+  {{range .Tabs}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}
+</nav>{{end}}{{end}}

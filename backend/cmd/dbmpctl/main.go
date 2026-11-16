@@ -22,10 +22,15 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 )
 
-const usage = `usage: dbmpctl create-admin [-username admin] < password
+const usage = `usage:
+  dbmpctl create-admin [-username admin] < password
+  dbmpctl seed-demo [-password demo12345] [-host localhost]
 
-Membuat Platform Admin, atau mereset password + mengaktifkan kembali admin yang sudah ada.
-Password dibaca dari stdin (tersembunyi jika dari terminal), minimal 8 karakter.`
+create-admin: membuat Platform Admin, atau mereset password + mengaktifkan kembali admin yang sudah ada.
+Password dibaca dari stdin (tersembunyi jika dari terminal), minimal 8 karakter.
+
+seed-demo: menyiapkan data demo untuk development (admin, alice, bob, carol, group backend-team dan
+analyst, serta koneksi inventory, staging, sales). Aman dijalankan ulang. Ditolak saat APP_ENV=production.`
 
 func main() {
 	if err := run(os.Args[1:], os.Stdin, os.Stdout); err != nil {
@@ -35,13 +40,25 @@ func main() {
 }
 
 func run(args []string, stdin *os.File, stdout io.Writer) error {
-	if len(args) == 0 || args[0] != "create-admin" {
+	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, usage)
 		return errors.New("perintah tidak dikenal")
 	}
+	switch args[0] {
+	case "create-admin":
+		return runCreateAdmin(args[1:], stdin, stdout)
+	case "seed-demo":
+		return runSeedDemo(args[1:], stdout)
+	default:
+		fmt.Fprintln(os.Stderr, usage)
+		return errors.New("perintah tidak dikenal")
+	}
+}
+
+func runCreateAdmin(args []string, stdin *os.File, stdout io.Writer) error {
 	fs := flag.NewFlagSet("create-admin", flag.ContinueOnError)
 	username := fs.String("username", "admin", "username admin")
-	if err := fs.Parse(args[1:]); err != nil {
+	if err := fs.Parse(args); err != nil {
 		return err
 	}
 

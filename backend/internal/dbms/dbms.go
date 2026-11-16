@@ -3,6 +3,8 @@ package dbms
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -20,7 +22,65 @@ var (
 	ErrNotImplemented = errors.New("belum diimplementasi")
 
 	ErrInvalidQuery = errors.New("query tidak valid")
+
+	ErrCommitUncertain = errors.New("hasil commit tidak pasti, periksa riwayat target sebelum retry")
+
+	ErrInvalidDirection = errors.New("arah eksekusi migration tidak dikenal")
 )
+
+type Direction string
+
+const (
+	DirectionUp   Direction = "up"
+	DirectionDown Direction = "down"
+)
+
+func (d Direction) Normalize() (Direction, error) {
+	switch d {
+	case "", DirectionUp:
+		return DirectionUp, nil
+	case DirectionDown:
+		return DirectionDown, nil
+	}
+	return "", fmt.Errorf("%w: %q", ErrInvalidDirection, string(d))
+}
+
+type StatementError struct {
+	Batch    int
+	Index    int
+	SQL      string
+	SQLState string
+	Message  string
+	Detail   string
+	Hint     string
+	Position int
+	Err      error
+}
+
+func (e *StatementError) Error() string {
+	prefix := ""
+	if e.Batch > 0 {
+		prefix = fmt.Sprintf("batch %d: ", e.Batch)
+	}
+	if e.Index == 0 {
+		return fmt.Sprintf("%scommit failed: %s", prefix, e.Message)
+	}
+	return fmt.Sprintf("%sstatement %d failed: %s", prefix, e.Index, e.Message)
+}
+
+func (e *StatementError) Unwrap() error { return e.Err }
+
+func (e *StatementError) StatementIndex() int { return e.Index }
+
+func (e *StatementError) Retryable() bool { return RetryableSQLState(e.SQLState) }
+
+func RetryableSQLState(code string) bool {
+	switch code {
+	case "40001", "40P01", "55P03", "57P03":
+		return true
+	}
+	return strings.HasPrefix(code, "08") || strings.HasPrefix(code, "53")
+}
 
 type ConnConfig struct {
 	Kind     string
@@ -61,6 +121,7 @@ type DataBrowser interface {
 type Migrator interface {
 	SupportsTransactionalDDL() bool
 	Apply(ctx context.Context, in ApplyInput) (*ApplyResult, error)
+	CommittedVersion(ctx context.Context, runID int64) (version int, found bool, err error)
 }
 
 type Explainer interface {
@@ -94,6 +155,7 @@ type Cell struct {
 
 type ApplyInput struct {
 	SQL              string
+	Direction        Direction
 	DatabaseID       int64
 	MigrationID      int64
 	RunID            int64
@@ -105,6 +167,7 @@ type ApplyInput struct {
 
 type ApplyResult struct {
 	StatementsExecuted   int
+	Statements           []string
 	AppliedAt            time.Time
 	FailedStatementIndex int
 	ErrorCode            string
@@ -140,6 +203,10 @@ func (m unimplementedMigrator) SupportsTransactionalDDL() bool { return m.transa
 
 func (unimplementedMigrator) Apply(context.Context, ApplyInput) (*ApplyResult, error) {
 	return nil, ErrNotImplemented
+}
+
+func (unimplementedMigrator) CommittedVersion(context.Context, int64) (int, bool, error) {
+	return 0, false, ErrNotImplemented
 }
 
 func UnimplementedExplainer() Explainer { return unimplementedExplainer{} }

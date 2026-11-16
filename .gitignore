@@ -2,8 +2,6 @@
 *.exe
 /bin/
 backend/tmp/
-frontend/node_modules/
-frontend/dist/
 .DS_Store
-backend/internal/web/dist/*
-!backend/internal/web/dist/.gitkeep
+backend/internal/spa/dist/*
+!backend/internal/spa/dist/.gitkeep

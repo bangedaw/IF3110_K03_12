@@ -1,0 +1,34 @@
+{{define "title"}}Koneksi database{{end}}
+{{define "content"}}
+<div class="page-head">
+  <div>
+    <h1>Koneksi database</h1>
+    <p class="muted">Database target yang dikelola platform. Password tersimpan terenkripsi dan tidak pernah ditampilkan.</p>
+  </div>
+  <a class="btn" href="/admin/connections/new">Tambah koneksi</a>
+</div>
+{{if .Data.Items}}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Nama</th><th>DBMS</th><th>Alamat</th><th>Status</th><th class="right">Aksi</th></tr></thead>
+  <tbody>
+  {{range .Data.Items}}
+  <tr>
+    <td><strong>{{.Name}}</strong></td>
+    <td>{{kindLabel .Kind}}</td>
+    <td class="mono">{{.Username}}@{{.Host}}:{{.Port}}/{{.DatabaseName}}</td>
+    <td>{{if .IsActive}}<span class="badge badge-success">Aktif</span>{{else}}<span class="badge">Nonaktif</span>{{end}}</td>
+    <td class="right">
+      <div class="actions">
+        <form class="inline-form" method="post" action="/admin/connections/{{.ID}}/test">{{template "csrf" $}}<button class="btn btn-secondary btn-sm" type="submit">Test</button></form>
+        <a class="btn btn-secondary btn-sm" href="/admin/connections/{{.ID}}">Ubah</a>
+        <a class="btn btn-secondary btn-sm" href="/admin/connections/{{.ID}}/delete">Hapus</a>
+      </div>
+    </td>
+  </tr>
+  {{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p class="empty">Belum ada koneksi. Tambahkan koneksi pertama untuk mulai.</p>{{end}}
+{{end}}

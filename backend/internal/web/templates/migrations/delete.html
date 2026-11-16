@@ -1,0 +1,14 @@
+{{define "title"}}Hapus draft migration{{end}}
+{{define "content"}}
+{{$d := .Data}}
+{{template "dbheader" .}}
+<form class="card" method="post" action="{{$d.BaseURL}}/delete">
+  {{template "csrf" .}}
+  <input type="hidden" name="revision" value="{{$d.M.Revision}}">
+  <p>Hapus draft migration <strong>#{{$d.M.ID}} {{$d.M.Title}}</strong>? Aksi ini tidak dapat dibatalkan.</p>
+  <div class="actions">
+    <button class="btn btn-danger" type="submit">Ya, hapus</button>
+    <a class="btn btn-secondary" href="{{$d.BaseURL}}">Batal</a>
+  </div>
+</form>
+{{end}}

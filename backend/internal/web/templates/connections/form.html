@@ -1,0 +1,72 @@
+{{define "title"}}{{if .Data.Editing}}Ubah koneksi{{else}}Tambah koneksi{{end}}{{end}}
+{{define "content"}}
+{{$d := .Data}}
+<div class="page-head">
+  <div>
+    <h1>{{if $d.Editing}}Ubah koneksi{{else}}Tambah koneksi{{end}}</h1>
+    <p class="muted"><a href="/admin/connections">Kembali ke daftar koneksi</a></p>
+  </div>
+</div>
+{{if index $d.Errors "form"}}<div class="notice notice-danger" role="alert">{{index $d.Errors "form"}}</div>{{end}}
+{{if $d.TestResult}}<div class="notice notice-success" role="status">Koneksi berhasil ({{$d.TestResult.LatencyMs}} ms).</div>{{end}}
+{{if $d.TestError}}<div class="notice notice-danger" role="alert">Koneksi gagal: {{$d.TestError}}</div>{{end}}
+<form class="card" method="post" action="{{if $d.Editing}}/admin/connections/{{$d.ID}}{{else}}/admin/connections/new{{end}}" novalidate>
+  {{template "csrf" .}}
+  <input type="hidden" name="id" value="{{$d.ID}}">
+  <div class="form-grid">
+    <div class="field">
+      <label for="name">Nama</label>
+      <input id="name" name="name" type="text" value="{{$d.Name}}" required{{if index $d.Errors "name"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.Errors "name"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    <div class="field">
+      <label for="kind">DBMS</label>
+      <select id="kind" name="kind">
+        <option value="postgres"{{if eq $d.Kind "postgres"}} selected{{end}}>PostgreSQL</option>
+        <option value="mysql"{{if eq $d.Kind "mysql"}} selected{{end}}>MySQL</option>
+      </select>
+      {{with index $d.Errors "kind"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    <div class="field">
+      <label for="host">Host</label>
+      <input id="host" name="host" type="text" value="{{$d.Host}}" required{{if index $d.Errors "host"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.Errors "host"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    <div class="field">
+      <label for="port">Port</label>
+      <input id="port" name="port" type="text" inputmode="numeric" value="{{$d.Port}}" required{{if index $d.Errors "port"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.Errors "port"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    <div class="field">
+      <label for="databaseName">Nama database</label>
+      <input id="databaseName" name="databaseName" type="text" value="{{$d.DatabaseName}}" required{{if index $d.Errors "databaseName"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.Errors "databaseName"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    <div class="field">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="off" value="{{$d.Username}}" required{{if index $d.Errors "username"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{with index $d.Errors "username"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="new-password" value=""{{if index $d.Errors "password"}} class="is-invalid" aria-invalid="true"{{end}}>
+      {{if $d.Editing}}<span class="hint">Kosongkan jika tidak ingin mengubah password tersimpan.</span>{{end}}
+      {{with index $d.Errors "password"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+    <div class="field">
+      <label for="sslMode">SSL mode</label>
+      <select id="sslMode" name="sslMode">
+        {{range $d.SSLModes}}<option value="{{.}}"{{if eq . $d.SSLMode}} selected{{end}}>{{.}}</option>{{end}}
+      </select>
+      {{with index $d.Errors "sslMode"}}<span class="error" role="alert">{{.}}</span>{{end}}
+    </div>
+  </div>
+  <p class="check"><input id="isActive" name="isActive" type="checkbox"{{if $d.IsActive}} checked{{end}}><label for="isActive">Koneksi aktif</label></p>
+  <div class="actions">
+    <button class="btn" type="submit">Simpan</button>
+    <button class="btn btn-secondary" type="submit" formaction="/admin/connections/test">Test koneksi</button>
+    <a class="btn btn-ghost" href="/admin/connections">Batal</a>
+  </div>
+  {{if $d.Editing}}<p class="hint muted">Tanpa mengisi password, tombol test menguji konfigurasi yang sudah tersimpan. Isi password untuk menguji nilai pada form.</p>{{end}}
+</form>
+{{end}}

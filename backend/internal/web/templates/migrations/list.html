@@ -1,0 +1,28 @@
+{{define "title"}}Migration · {{.Data.Header.DB.Name}}{{end}}
+{{define "content"}}
+{{$d := .Data}}
+{{template "dbheader" .}}
+<div class="page-head">
+  <p class="muted">Versi saat ini: <strong>{{$d.Head}}</strong></p>
+  {{if $d.CanEdit}}<a class="btn" href="{{$d.NewURL}}">Buat migration</a>{{end}}
+</div>
+<nav class="tabs" aria-label="Filter status">
+  {{range $d.Filters}}<a href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Label}}</a>{{end}}
+</nav>
+{{if $d.Items}}
+<div class="table-wrap">
+<table>
+  <thead><tr><th>#</th><th>Judul</th><th>Status</th><th>Versi</th><th>Diperbarui</th></tr></thead>
+  <tbody>
+  {{range $d.Items}}<tr>
+    <td>{{.ID}}</td>
+    <td><a href="/databases/{{.DatabaseID}}/migrations/{{.ID}}">{{.Title}}</a></td>
+    <td>{{if eq .Status "applied"}}<span class="badge badge-success">applied</span>{{else}}<span class="badge">draft</span>{{end}}</td>
+    <td>{{with .Version}}{{.}}{{else}}-{{end}}</td>
+    <td>{{fmtTime .UpdatedAt}}</td>
+  </tr>{{end}}
+  </tbody>
+</table>
+</div>
+{{else}}<p class="empty">Belum ada migration.</p>{{end}}
+{{end}}

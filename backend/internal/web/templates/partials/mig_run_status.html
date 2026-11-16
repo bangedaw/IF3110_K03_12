@@ -1,0 +1,1 @@
+{{define "mig_run_status"}}{{if eq .Status "succeeded"}}<span class="badge badge-success">berhasil</span>{{else if eq .Status "failed"}}<span class="badge badge-danger">gagal · rollback</span>{{else}}<span class="badge">berjalan</span>{{end}}{{end}}
