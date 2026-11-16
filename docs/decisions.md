@@ -245,3 +245,21 @@ di log server dan tidak menggagalkan request.
   `CURRENT_TIMESTAMP`) agar perbedaan penulisan tidak dianggap perubahan.
 - Urutan SQL aman: drop constraint → drop index → drop/alter kolom → drop tabel → create tabel → add kolom
   → add constraint dan index.
+
+## 14. Approval migration (Milestone 2)
+
+Spesifikasi: setiap perubahan database, termasuk rollback dan forward, wajib disetujui leader setiap
+group yang punya akses ke database tersebut, baik View Only maupun View + Edit.
+
+- **Group tidak boleh tanpa leader.** Leader wajib diisi saat group dibuat dan harus anggota group itu.
+  Leader tidak bisa dikeluarkan dari group, dihapus, atau dinonaktifkan sebelum penggantinya ditunjuk.
+- **Fail closed.** Group dari Milestone 1 yang belum punya leader tidak bisa diberi akses baru, dan
+  migration pada database yang diaksesnya tertahan di Pending Review sampai admin menunjuk leader.
+  Approval tidak pernah dilewati diam-diam.
+- **Platform Admin tidak ikut menyetujui karena jabatannya.** Admin hanya menyetujui jika ia leader salah
+  satu group yang punya akses. Ini sejalan dengan bagian 7: Platform Admin tidak otomatis punya akses data.
+- **Self-approval diperbolehkan**, dan satu user yang memimpin beberapa group cukup menyetujui sekali
+  (jawaban Sheets Q&A no. 4.1).
+- **Eksekusi tidak otomatis.** Setelah semua approval terkumpul, status menjadi Approved dan job baru
+  dibuat saat pengguna menekan eksekusi (jawaban Sheets Q&A no. 4.7). Approval melekat pada migration;
+  retry tidak butuh approval ulang (no. 4.8).

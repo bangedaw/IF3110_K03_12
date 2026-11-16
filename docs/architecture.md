@@ -156,25 +156,23 @@ Daftarkan menu dengan `AddNav(NavItem{Label: "Laporan", Path: "/reports", AdminO
 Tiga ruas pekerjaan (lihat [pembagian-tugas-m2.md](pembagian-tugas-m2.md)) hanya bertemu di interface
 berikut. Setiap interface punya fake untuk test.
 
-### `dbms.Migrator`: eksekusi di database target
+### `dbms.Migrator` dan `dbms.BatchMigrator`: eksekusi di database target
 
-Dipanggil worker, diimplementasi driver PostgreSQL. Fake: `dbms.FakeMigrator`.
+Dipanggil worker, diimplementasi driver PostgreSQL. Fake untuk keduanya: `dbms.FakeMigrator`.
 
-- `Apply` menjalankan satu SQL dalam satu transaction dan mencatat `RunID` di tabel
-  `_dbmp_schema_history` pada database target. Dipakai untuk apply, forward (SQL up), dan rollback
-  (SQL down) pada mode biasa.
-- `CommittedVersion` memeriksa apakah sebuah `RunID` benar-benar ter-commit di target. Ini bukti eksekusi
-  yang diperiksa sebelum retry ketika hasil commit belum pasti.
-- `ApplyBatches` menjalankan migration per batch:
-  - `Table`, `Column`, dan `Size` menentukan tabel yang diiterasi, kolom cursor, dan ukuran batch.
-  - `SQL` dijalankan sekali per batch dengan dua parameter: `$1` batas bawah dan `$2` batas atas nilai
-    `Column` pada batch itu, keduanya inklusif. Contoh: `UPDATE app.books SET price = price * 2 WHERE id
-    BETWEEN $1 AND $2`.
-  - Setiap batch memakai transaction sendiri, dan checkpoint disimpan di database target dalam
-    transaction yang sama. Memanggil ulang untuk `MigrationID` yang sama melanjutkan dari checkpoint.
-  - `Revert: true` menjalankan `SQL` (SQL down) pada batch yang sudah ter-commit, dalam urutan terbalik.
-  - Nilai kembali `BatchProgress` adalah jumlah batch dan row yang saat ini ter-commit untuk migration
-    tersebut: naik saat apply, turun sampai nol saat revert. Nilai ini tetap diisi ketika error, sehingga
-    pemanggil bisa menampilkan status partial atau partially reverted.
+- `Migrator.Apply` menjalankan SQL dalam satu transaction dan mencatat `RunID` di tabel
+  `_dbmp_schema_history` pada database target. `Direction` membedakan SQL up (apply, forward) dari SQL
+  down (rollback).
+- `Migrator.CommittedVersion` memeriksa apakah sebuah `RunID` benar-benar ter-commit di target. Ini bukti
+  eksekusi yang diperiksa sebelum retry ketika hasil commit belum pasti.
+- `BatchMigrator` menjalankan migration per batch: `ApplyBatches`, `RevertBatches`, dan `BatchProgress`.
+  - SQL batch harus satu statement yang memakai `$1` (cursor, eksklusif) dan `$2` (batas, inklusif),
+    misalnya `UPDATE t SET ... WHERE id > $1 AND id <= $2`. Kolom batch harus integer dan unik.
+  - Checkpoint disimpan di database target per `RunID`. Memanggil `ApplyBatches` lagi dengan `RunID`
+    yang sama melanjutkan dari checkpoint.
+  - `RevertBatches` menerima `RunID` eksekusi yang dibatalkan dan `ByRunID` eksekusi rollback-nya.
+  - `BatchProgress.State()` menghasilkan `partial`, `completed`, `partially_reverted`, atau `reverted`.
   - `OnBatch` dipanggil setelah setiap batch ter-commit, untuk memperbarui progres job dan memperpanjang
     lock database.
+
+Rincian mode batch dan hasil ujinya ada di README.
