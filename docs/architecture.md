@@ -150,3 +150,31 @@ Daftarkan menu dengan `AddNav(NavItem{Label: "Laporan", Path: "/reports", AdminO
   diuji tanpa menunggu.
 - Halaman: `httptest` terhadap router penuh (status, redirect, cookie, isi HTML, penolakan akses, CSRF) dengan
   fixture testcontainers; alur login → admin → explorer → logout diuji dengan session asli di `cmd/server`.
+
+## Kontrak antar ruas (Milestone 2)
+
+Tiga ruas pekerjaan (lihat [pembagian-tugas-m2.md](pembagian-tugas-m2.md)) hanya bertemu di interface
+berikut. Setiap interface punya fake untuk test.
+
+### `dbms.Migrator`: eksekusi di database target
+
+Dipanggil worker, diimplementasi driver PostgreSQL. Fake: `dbms.FakeMigrator`.
+
+- `Apply` menjalankan satu SQL dalam satu transaction dan mencatat `RunID` di tabel
+  `_dbmp_schema_history` pada database target. Dipakai untuk apply, forward (SQL up), dan rollback
+  (SQL down) pada mode biasa.
+- `CommittedVersion` memeriksa apakah sebuah `RunID` benar-benar ter-commit di target. Ini bukti eksekusi
+  yang diperiksa sebelum retry ketika hasil commit belum pasti.
+- `ApplyBatches` menjalankan migration per batch:
+  - `Table`, `Column`, dan `Size` menentukan tabel yang diiterasi, kolom cursor, dan ukuran batch.
+  - `SQL` dijalankan sekali per batch dengan dua parameter: `$1` batas bawah dan `$2` batas atas nilai
+    `Column` pada batch itu, keduanya inklusif. Contoh: `UPDATE app.books SET price = price * 2 WHERE id
+    BETWEEN $1 AND $2`.
+  - Setiap batch memakai transaction sendiri, dan checkpoint disimpan di database target dalam
+    transaction yang sama. Memanggil ulang untuk `MigrationID` yang sama melanjutkan dari checkpoint.
+  - `Revert: true` menjalankan `SQL` (SQL down) pada batch yang sudah ter-commit, dalam urutan terbalik.
+  - Nilai kembali `BatchProgress` adalah jumlah batch dan row yang saat ini ter-commit untuk migration
+    tersebut: naik saat apply, turun sampai nol saat revert. Nilai ini tetap diisi ketika error, sehingga
+    pemanggil bisa menampilkan status partial atau partially reverted.
+  - `OnBatch` dipanggil setelah setiap batch ter-commit, untuk memperbarui progres job dan memperpanjang
+    lock database.
