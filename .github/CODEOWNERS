@@ -14,6 +14,7 @@
 /backend/internal/authz/                  @miguelsinaga
 /backend/internal/admin/                  @miguelsinaga
 /backend/internal/audit/                  @miguelsinaga
+/backend/internal/queue/                  @miguelsinaga
 /backend/internal/web/auth_pages.go      @miguelsinaga
 /backend/internal/web/admin_pages.go     @miguelsinaga
 /backend/internal/web/templates/auth/    @miguelsinaga

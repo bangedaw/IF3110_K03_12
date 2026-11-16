@@ -153,7 +153,7 @@ Daftarkan menu dengan `AddNav(NavItem{Label: "Laporan", Path: "/reports", AdminO
 
 ## Kontrak antar ruas (Milestone 2)
 
-Tiga ruas pekerjaan (lihat [pembagian-tugas-m2.md](pembagian-tugas-m2.md)) hanya bertemu di interface
+Tiga ruas pekerjaan (migration, queue dan worker, eksekusi di target) hanya bertemu di interface
 berikut. Setiap interface punya fake untuk test.
 
 ### `dbms.Migrator` dan `dbms.BatchMigrator`: eksekusi di database target
@@ -176,3 +176,39 @@ Dipanggil worker, diimplementasi driver PostgreSQL. Fake untuk keduanya: `dbms.F
     lock database.
 
 Rincian mode batch dan hasil ujinya ada di README.
+
+### `queue.Publisher`: memasukkan eksekusi ke antrean
+
+Dipanggil service migration saat pengguna menekan eksekusi pada request yang sudah Approved, diimplementasi
+paket `queue`. Fake: `queue.Fake`.
+
+- `Publish` membuat job untuk satu request (apply, rollback, atau forward) dan langsung mengembalikan job
+  ID tanpa menunggu SQL selesai. `ActorID` adalah pengguna yang menekan eksekusi.
+- Idempotent per request: satu request hanya punya satu job (`jobs.request_id` unik). `Publish` kedua
+  untuk request yang sama mengembalikan job ID yang sama, sehingga pesan duplikat tidak menghasilkan
+  eksekusi ganda. Jika job itu berstatus gagal atau partial, `Publish` mengantrekannya kembali untuk
+  dilanjutkan dari checkpoint.
+- Trace context diambil dari `ctx` dan disimpan di job, lalu dilanjutkan oleh worker.
+
+### `queue.Lifecycle`: siklus satu eksekusi
+
+Dipanggil worker, diimplementasi service migration. Fake: `queue.FakeLifecycle`. Interface ini berada di
+paket `queue` (pihak pemanggil) karena `migration` sudah mengimpor `queue` untuk `Publisher`.
+
+- `Start` dipanggil sekali per attempt, setelah worker memegang lock database. Service migration
+  melakukan revalidasi (approval masih lengkap, urutan linear masih sah, revisi SQL tidak berubah), lalu
+  mencatat attempt sebagai baris baru di riwayat beserta salinan SQL yang dijalankan, dan mengembalikan
+  `Execution` berisi apa yang harus dijalankan.
+  - `Direction` adalah `up` untuk apply dan forward, `down` untuk rollback.
+  - `Batch` berisi `nil` untuk mode biasa.
+  - `RunID` adalah ID attempt ini. `CheckpointRunID` adalah ID run pemilik checkpoint batch di database
+    target: sama dengan `RunID` pada attempt pertama, tetap sama saat retry agar eksekusi lanjut dari
+    checkpoint, dan pada rollback menunjuk run yang dibatalkan.
+  - Error bertipe `*apperr.Error` berarti revalidasi menolak dan job tidak di-retry. Error lain dianggap
+    sementara.
+- `Finish` dipanggil sekali per attempt setelah hasilnya pasti. `Err` kosong berarti berhasil. Jika `Err`
+  terisi dan `Progress` menunjukkan sebagian batch sudah ter-commit, hasilnya partial; selain itu gagal.
+  `WillRetry` memberi tahu bahwa attempt berikutnya masih akan dijalankan, sehingga request belum boleh
+  ditandai gagal.
+- Jika hasil commit belum pasti (`dbms.ErrCommitUncertain`), worker memeriksa `CommittedVersion` lebih
+  dulu dan baru memanggil `Finish` setelah hasilnya diketahui.
