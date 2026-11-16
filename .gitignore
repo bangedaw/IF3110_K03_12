@@ -3,3 +3,5 @@
 /bin/
 backend/tmp/
 .DS_Store
+backend/internal/spa/dist/*
+!backend/internal/spa/dist/.gitkeep

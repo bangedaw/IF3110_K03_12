@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,7 +27,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
-	"github.com/bangedaw/IF3110_K03_12/backend/internal/web"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/spa"
 
 	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/mysql"
 	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres"
@@ -59,7 +60,7 @@ func run() error {
 		return err
 	}
 
-	handler, cleanup, err := newHandler(cfg, pool, logger)
+	handler, cleanup, err := newHandler(cfg, pool, logger, spa.Dist())
 	if err != nil {
 		return err
 	}
@@ -84,7 +85,7 @@ func run() error {
 	return srv.Shutdown(shutdownCtx)
 }
 
-func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (http.Handler, func(), error) {
+func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, ui fs.FS) (http.Handler, func(), error) {
 	cipher, err := secret.New(cfg.SecretKey)
 	if err != nil {
 		return nil, nil, err
@@ -99,12 +100,6 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 	adminSvc := admin.NewService(pool, az, auditLog)
 	migrationRepo := migration.NewRepository(pool)
 	migrationTargets := dbconn.Targets{Registry: registry}
-	migrationSvc := &migration.Service{
-		Repo:    migrationRepo,
-		Targets: migrationTargets,
-		Auth:    az,
-		Audit:   auditLog,
-	}
 	reconcileCtx, cancelReconcile := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelReconcile()
 	if err := (migration.Reconciler{Repo: migrationRepo, Targets: migrationTargets, Logger: logger}).Reconcile(reconcileCtx); err != nil {
@@ -131,21 +126,11 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger) (htt
 			explorer.Routes(p, explorerSvc)
 		})
 	})
-	pages, err := web.New(web.Deps{
-		Logger:      logger,
-		Guard:       web.NewAuthGuard(authSvc),
-		Authz:       az,
-		Connections: connSvc,
-		Explorer:    explorerSvc,
-		Admin:       adminSvc,
-		Migrations:  migrationSvc,
-		Reload:      cfg.Env == "dev",
-		AssetsDir:   "internal/web",
-	})
-	if err != nil {
-		return nil, nil, err
+	if h, ok := spa.Handler(ui); ok {
+		r.Method(http.MethodGet, "/*", h)
+		r.Method(http.MethodHead, "/*", h)
+	} else {
+		logger.Warn("frontend SPA belum di-build, hanya /api yang dilayani")
 	}
-	pages.Mount(r)
-	r.NotFound(pages.NotFound)
 	return r, registry.Close, nil
 }

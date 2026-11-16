@@ -6,7 +6,7 @@ GOLANGCI_VERSION     := v2.5.0
 
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: gen lint run build dev down seed reseed check test test-race
+.PHONY: gen lint run build web web-dev dev down seed reseed check test test-race
 
 dev:
 	$(COMPOSE) up -d --wait
@@ -36,6 +36,7 @@ test-race:
 gen:
 	cd backend && go run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION) generate
 	cd backend && go run github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_CODEGEN_VERSION) -config oapi-codegen.yaml ../api/openapi.yaml
+	cd frontend && npm run gen:api
 
 lint:
 	cd backend && go vet ./... && go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION) run
@@ -43,5 +44,13 @@ lint:
 run:
 	cd backend && go run ./cmd/server
 
-build:
+web:
+	cd frontend && npm ci && npm run build
+	find backend/internal/spa/dist -mindepth 1 ! -name .gitkeep -delete
+	cp -r frontend/dist/. backend/internal/spa/dist/
+
+web-dev:
+	cd frontend && npm run dev
+
+build: web
 	cd backend && go build -o ../bin/dbmp ./cmd/server && go build -o ../bin/dbmpctl ./cmd/dbmpctl
