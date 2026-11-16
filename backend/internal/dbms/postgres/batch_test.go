@@ -179,6 +179,8 @@ func TestBatchRevertRunsInReverseOrderAndCanResume(t *testing.T) {
 
 	p, err = m.RevertBatches(context.Background(), revert)
 	require.NoError(t, err)
+	assert.Equal(t, dbms.BatchReverted, p.State())
+	assert.Equal(t, 11, p.BatchesReverted)
 	assert.Equal(t, map[int]int{0: 1050}, hitsBetween(t, pool, 1, 1050), "revert ulang tidak membatalkan dua kali")
 }
 
