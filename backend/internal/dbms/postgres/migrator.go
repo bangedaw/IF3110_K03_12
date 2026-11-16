@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqlsplit"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqltrace"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -99,6 +101,9 @@ func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyRes
 	if err != nil {
 		return nil, err
 	}
+	ctx = sqltrace.With(ctx,
+		slog.Int64("database_id", in.DatabaseID), slog.Int64("migration_id", in.MigrationID),
+		slog.Int64("run_id", in.RunID), slog.Int("version", in.Version), slog.String("direction", string(direction)))
 	conn, release, err := m.connectLocked(ctx, in.DatabaseID)
 	if err != nil {
 		return nil, err
@@ -194,5 +199,10 @@ func (m Migrator) CommittedVersion(ctx context.Context, runID int64) (int, bool,
 type DSNConnector struct{ DSN string }
 
 func (d DSNConnector) Connect(ctx context.Context) (*pgx.Conn, error) {
-	return pgx.Connect(ctx, strings.TrimSpace(d.DSN))
+	cfg, err := pgx.ParseConfig(strings.TrimSpace(d.DSN))
+	if err != nil {
+		return nil, errors.New("konfigurasi koneksi postgres tidak valid")
+	}
+	cfg.Tracer = targetTracer
+	return pgx.ConnectConfig(ctx, cfg)
 }
