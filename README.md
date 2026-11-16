@@ -66,6 +66,34 @@ serta dua group (`backend-team`: alice, carol; `analyst`: bob, carol):
 | bob | inventory View Only, sales View Only |
 | carol | inventory View + Edit, inventory-staging View Only, sales View Only |
 
+### Dataset besar untuk uji migration
+
+Dataset ini dipakai untuk membandingkan migration biasa dengan migration per batch. Tidak dimuat otomatis
+oleh `make dev` karena butuh waktu dan ruang disk.
+
+```bash
+make seed-large                            # 2.000.000 baris di inventory (port 5433), ±8 detik
+make seed-large LOADTEST_ROWS=500000       # ukuran lain; menjalankan ulang membuat ulang tabel
+make bench-update                          # ukur UPDATE seluruh row tanpa batching (3 kali)
+```
+
+Tabel `loadtest.transactions` berisi `id` berurutan (kolom cursor batch), `account_id`, `amount`, `status`,
+`note`, `created_at`, `updated_at`, dua index sekunder, serta kolom `amount_cents` yang masih kosong
+sebagai target backfill. Query yang diukur:
+
+```sql
+UPDATE loadtest.transactions SET amount_cents = (amount * 100)::bigint, updated_at = now();
+```
+
+`bench-update` menjalankan query di dalam `BEGIN … ROLLBACK` lalu `VACUUM`, sehingga dataset tetap sama
+untuk uji migration per batch dengan query yang sama.
+
+| Lingkungan | Baris | Ukuran tabel + index | Durasi UPDATE tanpa batching |
+|---|---|---|---|
+| Intel Core i7-13650HX, RAM 11 GB, PostgreSQL 17.11 (Docker) | 2.000.000 | 361 MB | 17,3 s; 12,8 s; 12,7 s |
+
+Hasil uji migration per batch pada dataset yang sama dicatat setelah mode batch selesai.
+
 ## Build satu binary (demo/production)
 
 ```bash

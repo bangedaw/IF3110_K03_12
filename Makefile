@@ -6,7 +6,7 @@ GOLANGCI_VERSION     := v2.5.0
 
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: gen lint run build web web-dev dev down seed reseed check test test-race
+.PHONY: gen lint run build web web-dev dev down seed reseed seed-large bench-update check test test-race
 
 dev:
 	$(COMPOSE) up -d --wait
@@ -23,6 +23,14 @@ reseed:
 	$(COMPOSE) down -v
 	$(COMPOSE) up -d --wait
 	bash deploy/check.sh
+
+LOADTEST_ROWS ?= 2000000
+
+seed-large: dev
+	$(COMPOSE) exec -T target-pg-1 psql -U dbmp -d inventory -v rows=$(LOADTEST_ROWS) < deploy/seed/pg1_loadtest.sql
+
+bench-update:
+	bash deploy/bench-update.sh
 
 check:
 	bash deploy/check.sh
