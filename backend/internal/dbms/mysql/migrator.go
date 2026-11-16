@@ -18,10 +18,6 @@ func (m Migrator) SupportsTransactionalDDL() bool { return false }
 
 const errNoSuchTable = 1146
 
-func (m Migrator) ApplyBatches(context.Context, dbms.BatchInput) (dbms.BatchProgress, error) {
-	return dbms.BatchProgress{}, dbms.ErrNotImplemented
-}
-
 func (m Migrator) CommittedVersion(ctx context.Context, runID int64) (int, bool, error) {
 	var version int
 	err := m.DB.QueryRowContext(ctx, `SELECT version FROM _dbmp_schema_history WHERE run_id = ?`, runID).Scan(&version)

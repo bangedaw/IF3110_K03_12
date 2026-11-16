@@ -178,10 +178,6 @@ func commitError(err error) error {
 
 var ErrLockBusy = errors.New("target database already has a migration running")
 
-func (m Migrator) ApplyBatches(context.Context, dbms.BatchInput) (dbms.BatchProgress, error) {
-	return dbms.BatchProgress{}, dbms.ErrNotImplemented
-}
-
 func (m Migrator) CommittedVersion(ctx context.Context, runID int64) (int, bool, error) {
 	conn, err := m.Connector.Connect(ctx)
 	if err != nil {

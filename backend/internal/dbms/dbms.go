@@ -121,7 +121,6 @@ type DataBrowser interface {
 type Migrator interface {
 	SupportsTransactionalDDL() bool
 	Apply(ctx context.Context, in ApplyInput) (*ApplyResult, error)
-	ApplyBatches(ctx context.Context, in BatchInput) (BatchProgress, error)
 	CommittedVersion(ctx context.Context, runID int64) (version int, found bool, err error)
 }
 
@@ -176,23 +175,6 @@ type ApplyResult struct {
 	Position             int
 }
 
-type BatchInput struct {
-	SQL         string
-	Table       string
-	Column      string
-	Size        int
-	Revert      bool
-	DatabaseID  int64
-	MigrationID int64
-	RunID       int64
-	OnBatch     func(BatchProgress)
-}
-
-type BatchProgress struct {
-	Batches int
-	Rows    int64
-}
-
 type ExplainInput struct {
 	SQL              string
 	Analyze          bool
@@ -221,10 +203,6 @@ func (m unimplementedMigrator) SupportsTransactionalDDL() bool { return m.transa
 
 func (unimplementedMigrator) Apply(context.Context, ApplyInput) (*ApplyResult, error) {
 	return nil, ErrNotImplemented
-}
-
-func (unimplementedMigrator) ApplyBatches(context.Context, BatchInput) (BatchProgress, error) {
-	return BatchProgress{}, ErrNotImplemented
 }
 
 func (unimplementedMigrator) CommittedVersion(context.Context, int64) (int, bool, error) {
