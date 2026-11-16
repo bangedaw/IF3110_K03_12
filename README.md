@@ -132,6 +132,32 @@ Mode batch dijalankan oleh `dbms.BatchMigrator` (implementasi PostgreSQL di
 - Selama eksekusi, koneksi worker memegang advisory lock database target sehingga eksekusi lain pada
   database yang sama ditolak, termasuk di antara commit batch.
 
+### Log dan span eksekusi SQL
+
+Setiap koneksi PostgreSQL, baik ke database target maupun platform DB, memakai `sqltrace.Tracer`
+(`backend/internal/sqltrace`), sehingga setiap query tercatat tanpa perlu instrumentasi di pemanggil. Ini
+termasuk query read-only explorer dan schema diff, test koneksi, migration, serta tiap batch.
+
+- Tiap query menghasilkan log `<event>.start` dan `<event>.end` (JSON lewat `log/slog` ke stdout). Event
+  `sql.begin`, `sql.query`, `sql.commit`, dan `sql.rollback` tercatat terpisah.
+- Atribut: `time`, `level`, `event`, `target` (`target`/`platform`), `database`, `server`, `actor`,
+  `request_id`, `query`, `params` (hanya database target), `duration_ms`, `rows`, `status`, serta `error`
+  dan `sqlstate` bila gagal. Migration menambahkan `database_id`, `migration_id`, `run_id`, `version`,
+  `direction`, dan untuk mode batch `mode`, `batch_size`, `batch`.
+- Kegiatan batch dicatat sebagai `migration.batch.committed`, `migration.batch.resume`,
+  `migration.batch.completed`, dan `migration.batch.reverted`.
+- Penyamaran: `PASSWORD '…'` dan `password=…` di teks SQL diganti `***`; parameter query platform DB
+  (hash session dan password) tidak pernah dicatat, hanya jumlahnya; nilai `[]byte` hanya dicatat ukurannya.
+- Span OpenTelemetry (`sql.query`, `sql.commit`, …) memakai tracer global dengan atribut `db.system.name`,
+  `db.namespace`, `db.query.text`, `db.response.returned_rows`, dan `db.response.status_code`; query gagal
+  diberi status error.
+
+Contoh log saat membuka data tabel di explorer:
+
+```json
+{"time":"2026-11-17T03:15:53.058+07:00","level":"INFO","msg":"sql.query.end","event":"sql.query","target":"target","database":"inventory","server":"localhost:5433","actor":2,"request_id":"arch/nUR1aEmLhS-000002","query":"SELECT \"id\"::text, … FROM \"inventory\".\"products\" ORDER BY \"inventory\".\"products\".\"id\" ASC LIMIT 2 OFFSET 0","duration_ms":17.774,"rows":2,"status":"ok"}
+```
+
 ## Build satu binary (demo/production)
 
 ```bash
