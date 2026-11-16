@@ -1,8 +1,9 @@
 # IF3110_K03_12 — Database Management Platform
 
 Platform untuk mengatur akses ke database bersama, menjelajahi schema dan data, serta menjalankan
-migration secara terkontrol. Backend Go (modular monolith) dengan tampilan **server-rendered**
-(`html/template`, tanpa SPA).
+migration secara terkontrol. Backend Go (modular monolith) yang melayani JSON API di `/api` dan frontend
+**Single-Page Application** (React, Vite, TypeScript) di `frontend/`. Hasil build SPA di-embed ke binary
+server.
 
 - Keputusan desain (session, CSRF, akses multi-group, Platform Admin, dll.): [docs/decisions.md](docs/decisions.md)
 - Arsitektur dan pembagian paket: [docs/architecture.md](docs/architecture.md)
@@ -11,6 +12,7 @@ migration secara terkontrol. Backend Go (modular monolith) dengan tampilan **ser
 ## Prasyarat
 
 - Go ≥ 1.25, Docker
+- Node.js ≥ 24 dan npm (frontend)
 - GNU make (Windows: jalankan dari Git Bash; `winget install ezwinports.make`)
 - gcc/cgo hanya untuk `make gen` (sqlc dijalankan via `go run`)
 
@@ -19,12 +21,17 @@ migration secara terkontrol. Backend Go (modular monolith) dengan tampilan **ser
 ```bash
 cp .env.example .env
 make dev                                   # platform DB + target PostgreSQL ×2 + MySQL, dengan data seed
-make run                                   # server di :8080 (migration platform DB otomatis)
+make run                                   # API di :8080 (migration platform DB otomatis)
+make web-dev                               # SPA di :5173 dengan hot reload, /api diteruskan ke :8080
 cd backend && go run ./cmd/dbmpctl create-admin -username admin   # sekali saja
 ```
 
-Buka http://localhost:8080 dan masuk sebagai admin. Dengan `APP_ENV=dev`, template dibaca langsung dari
-`backend/internal/web/templates` sehingga perubahan terlihat tanpa menjalankan ulang server.
+Buka http://localhost:5173 dan masuk sebagai admin. Jalankan `cd frontend && npm ci` sekali sebelum
+`make web-dev`. Bila SPA belum pernah di-build, `make run` hanya melayani `/api`; jalankan `make web`
+agar http://localhost:8080 juga melayani SPA.
+
+Test frontend: `cd frontend && npm test` (lint: `npm run lint`, tipe: `npm run typecheck`). Tipe API di
+`frontend/src/lib/api/schema.d.ts` di-generate dari `api/openapi.yaml` oleh `make gen`.
 
 `create-admin` meminta password tanpa menampilkannya (atau membaca stdin bila di-pipe). Menjalankan ulang
 untuk username yang sama akan mereset password, mengaktifkan akun, dan me-revoke semua session-nya.
@@ -62,8 +69,8 @@ serta dua group (`backend-team`: alice, carol; `analyst`: bob, carol):
 ## Build satu binary (demo/production)
 
 ```bash
-make build        # template dan aset statis di-embed → bin/dbmp dan bin/dbmpctl
-./bin/dbmp        # halaman web + JSON API di :8080
+make build        # build SPA, salin ke backend/internal/spa/dist, embed → bin/dbmp dan bin/dbmpctl
+./bin/dbmp        # SPA + JSON API di :8080; deep link seperti /databases/1 dilayani index.html
 ```
 
 Di production set `APP_ENV=production` (cookie `Secure`, wajib di belakang HTTPS) dan ganti
@@ -73,7 +80,7 @@ Di production set `APP_ENV=production` (cookie `Secure`, wajib di belakang HTTPS
 
 | Env var | Default | Keterangan |
 |---|---|---|
-| `APP_ENV` | `dev` | `production` mengaktifkan cookie `Secure`; `dev` membaca template dari disk |
+| `APP_ENV` | `dev` | `production` mengaktifkan cookie `Secure` |
 | `HTTP_ADDR` | `:8080` | alamat listen |
 | `DATABASE_URL` | — (wajib) | platform DB |
 | `DBMP_SECRET_KEY` | — (wajib) | 32 byte base64, enkripsi password database target |
