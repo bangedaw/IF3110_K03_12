@@ -96,11 +96,57 @@ func (ns NullDbmsKind) Value() (driver.Value, error) {
 	return string(ns.DbmsKind), nil
 }
 
+type JobStatus string
+
+const (
+	JobStatusPending   JobStatus = "pending"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusSucceeded JobStatus = "succeeded"
+	JobStatusFailed    JobStatus = "failed"
+	JobStatusPartial   JobStatus = "partial"
+)
+
+func (e *JobStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = JobStatus(s)
+	case string:
+		*e = JobStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for JobStatus: %T", src)
+	}
+	return nil
+}
+
+type NullJobStatus struct {
+	JobStatus JobStatus
+	Valid     bool // Valid is true if JobStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullJobStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.JobStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.JobStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullJobStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.JobStatus), nil
+}
+
 type MigStatus string
 
 const (
-	MigStatusDraft   MigStatus = "draft"
-	MigStatusApplied MigStatus = "applied"
+	MigStatusDraft      MigStatus = "draft"
+	MigStatusApplied    MigStatus = "applied"
+	MigStatusRolledBack MigStatus = "rolled_back"
 )
 
 func (e *MigStatus) Scan(src interface{}) error {
@@ -136,6 +182,97 @@ func (ns NullMigStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.MigStatus), nil
+}
+
+type RequestKind string
+
+const (
+	RequestKindApply    RequestKind = "apply"
+	RequestKindRollback RequestKind = "rollback"
+	RequestKindForward  RequestKind = "forward"
+)
+
+func (e *RequestKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RequestKind(s)
+	case string:
+		*e = RequestKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RequestKind: %T", src)
+	}
+	return nil
+}
+
+type NullRequestKind struct {
+	RequestKind RequestKind
+	Valid       bool // Valid is true if RequestKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRequestKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.RequestKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RequestKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRequestKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RequestKind), nil
+}
+
+type RequestStatus string
+
+const (
+	RequestStatusPendingReview RequestStatus = "pending_review"
+	RequestStatusApproved      RequestStatus = "approved"
+	RequestStatusRejected      RequestStatus = "rejected"
+	RequestStatusQueued        RequestStatus = "queued"
+	RequestStatusRunning       RequestStatus = "running"
+	RequestStatusSucceeded     RequestStatus = "succeeded"
+	RequestStatusFailed        RequestStatus = "failed"
+	RequestStatusPartial       RequestStatus = "partial"
+)
+
+func (e *RequestStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RequestStatus(s)
+	case string:
+		*e = RequestStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RequestStatus: %T", src)
+	}
+	return nil
+}
+
+type NullRequestStatus struct {
+	RequestStatus RequestStatus
+	Valid         bool // Valid is true if RequestStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRequestStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.RequestStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RequestStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRequestStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RequestStatus), nil
 }
 
 type RunStatus string
@@ -208,11 +345,19 @@ type DatabaseConnection struct {
 	UpdatedAt          pgtype.Timestamptz
 }
 
+type DatabaseLock struct {
+	DatabaseID int64
+	JobID      int64
+	Owner      string
+	ExpiresAt  pgtype.Timestamptz
+}
+
 type Group struct {
-	ID          int64
-	Name        string
-	Description string
-	CreatedAt   pgtype.Timestamptz
+	ID           int64
+	Name         string
+	Description  string
+	CreatedAt    pgtype.Timestamptz
+	LeaderUserID pgtype.Int8
 }
 
 type GroupDatabaseGrant struct {
@@ -226,21 +371,66 @@ type GroupMember struct {
 	UserID  int64
 }
 
+type Job struct {
+	ID               int64
+	RequestID        int64
+	DatabaseID       int64
+	Status           JobStatus
+	Attempts         int32
+	MaxAttempts      int32
+	RunAfter         pgtype.Timestamptz
+	TraceContext     []byte
+	BatchesCommitted int32
+	RowsCommitted    int64
+	LastError        pgtype.Text
+	CreatedBy        int64
+	CreatedAt        pgtype.Timestamptz
+	StartedAt        pgtype.Timestamptz
+	FinishedAt       pgtype.Timestamptz
+}
+
 type Migration struct {
+	ID                 int64
+	DatabaseID         int64
+	Title              string
+	Description        string
+	SqlText            string
+	Checksum           []byte
+	Status             MigStatus
+	Version            pgtype.Int4
+	BaseVersion        int32
+	Revision           int32
+	CreatedBy          int64
+	UpdatedBy          int64
+	AppliedBy          pgtype.Int8
+	AppliedAt          pgtype.Timestamptz
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+	DownSql            pgtype.Text
+	Irreversible       bool
+	IrreversibleReason string
+	BatchTable         pgtype.Text
+	BatchColumn        pgtype.Text
+	BatchSize          pgtype.Int4
+}
+
+type MigrationApproval struct {
+	RequestID int64
+	GroupID   int64
+	Approved  bool
+	DecidedBy int64
+	Comment   string
+	DecidedAt pgtype.Timestamptz
+}
+
+type MigrationRequest struct {
 	ID          int64
+	MigrationID int64
 	DatabaseID  int64
-	Title       string
-	Description string
-	SqlText     string
-	Checksum    []byte
-	Status      MigStatus
-	Version     pgtype.Int4
-	BaseVersion int32
+	Kind        RequestKind
 	Revision    int32
-	CreatedBy   int64
-	UpdatedBy   int64
-	AppliedBy   pgtype.Int8
-	AppliedAt   pgtype.Timestamptz
+	Status      RequestStatus
+	RequestedBy int64
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 }
@@ -258,6 +448,12 @@ type MigrationRun struct {
 	ErrorCode            pgtype.Text
 	ErrorMessage         pgtype.Text
 	FailedStatementIndex pgtype.Int4
+	RequestID            pgtype.Int8
+	JobID                pgtype.Int8
+	Kind                 RequestKind
+	Revision             int32
+	Attempt              int32
+	RevertsRunID         pgtype.Int8
 }
 
 type SchemaSnapshot struct {
