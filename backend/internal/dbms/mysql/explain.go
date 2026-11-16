@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
-	"github.com/bangedaw/IF3110_K03_12/backend/internal/migration/sqlsplit"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqlsplit"
 )
 
 type Explainer struct{ DB *sql.DB }

@@ -35,5 +35,6 @@
 /deploy/                                  @bangedaw
 
 /backend/internal/migration/              @SpicyCoinCracker
+/backend/internal/sqlsplit/               @SpicyCoinCracker
 /backend/internal/web/migration_pages.go     @SpicyCoinCracker
 /backend/internal/web/templates/migrations/  @SpicyCoinCracker

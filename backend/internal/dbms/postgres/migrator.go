@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
-	"github.com/bangedaw/IF3110_K03_12/backend/internal/migration/sqlsplit"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqlsplit"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )

@@ -11,7 +11,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
-	"github.com/bangedaw/IF3110_K03_12/backend/internal/migration/sqlsplit"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqlsplit"
 )
 
 const (

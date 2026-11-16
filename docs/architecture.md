@@ -71,6 +71,7 @@ handler (halaman HTML / JSON)  →  service (logika + authz)  →  sqlc queries 
 | `internal/dbconn` | CRUD koneksi, test koneksi, registry pool per database | Edo |
 | `internal/schema`, `internal/explorer`, `internal/schemadiff` | introspeksi, viewer, snapshot, diff | Edo |
 | `internal/migration` | draft, eksekusi transaksional, riwayat, EXPLAIN | Rhino |
+| `internal/sqlsplit` | pemecah dan validator statement SQL; dipakai `migration` dan driver `dbms` | Rhino |
 | `internal/web` (halaman migration) | `migration_pages.go` dan `templates/migrations` | Rhino |
 
 ## Lapisan web
