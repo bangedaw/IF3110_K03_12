@@ -28,6 +28,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/spa"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqltrace"
 
 	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/mysql"
 	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres"
@@ -51,7 +52,12 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	poolCfg, err := pgxpool.ParseConfig(cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	poolCfg.ConnConfig.Tracer = sqltrace.Tracer{Target: "platform"}
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
 	if err != nil {
 		return err
 	}

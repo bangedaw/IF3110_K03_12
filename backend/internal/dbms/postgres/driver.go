@@ -12,7 +12,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqltrace"
 )
+
+var targetTracer = sqltrace.Tracer{Target: "target", LogArgs: true}
 
 const (
 	defaultPort     = 5432
@@ -33,6 +36,7 @@ func (Driver) Open(ctx context.Context, cfg dbms.ConnConfig) (dbms.Conn, error) 
 	}
 	poolCfg.ConnConfig.RuntimeParams["application_name"] = applicationName
 	poolCfg.ConnConfig.ConnectTimeout = connectTimeout
+	poolCfg.ConnConfig.Tracer = targetTracer
 	poolCfg.MaxConns = poolMaxConns
 	poolCfg.MinConns = 0
 	poolCfg.MaxConnIdleTime = poolIdleTime
