@@ -32,3 +32,39 @@ func (f *Fake) Publish(_ context.Context, in PublishInput) (int64, error) {
 	f.jobs[in.RequestID] = id
 	return id, nil
 }
+
+type FakeLifecycle struct {
+	mu sync.Mutex
+
+	Execution Execution
+	StartErr  error
+	FinishErr error
+	Started   []StartInput
+	Finished  []FinishInput
+}
+
+var _ Lifecycle = (*FakeLifecycle)(nil)
+
+func (f *FakeLifecycle) Start(_ context.Context, in StartInput) (*Execution, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Started = append(f.Started, in)
+	if f.StartErr != nil {
+		return nil, f.StartErr
+	}
+	e := f.Execution
+	if e.RunID == 0 {
+		e.RunID = int64(len(f.Started))
+	}
+	if e.CheckpointRunID == 0 {
+		e.CheckpointRunID = 1
+	}
+	return &e, nil
+}
+
+func (f *FakeLifecycle) Finish(_ context.Context, in FinishInput) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Finished = append(f.Finished, in)
+	return f.FinishErr
+}
