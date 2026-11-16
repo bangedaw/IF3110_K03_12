@@ -18,28 +18,17 @@ type Connector interface {
 }
 type Migrator struct{ Connector Connector }
 
-type StatementError struct {
-	Index    int
-	SQLState string
-	Message  string
-	Detail   string
-	Hint     string
-	Position int
-	Err      error
-}
-
-func (e *StatementError) Error() string {
-	return fmt.Sprintf("statement %d failed: %s", e.Index, e.Message)
-}
-func (e *StatementError) Unwrap() error { return e.Err }
-
-func (e *StatementError) StatementIndex() int { return e.Index }
+type StatementError = dbms.StatementError
 
 func (m Migrator) SupportsTransactionalDDL() bool { return true }
 
 func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyResult, error) {
 	if m.Connector == nil {
 		return nil, errors.New("postgres migrator: nil connector")
+	}
+	direction, err := in.Direction.Normalize()
+	if err != nil {
+		return nil, err
 	}
 	conn, err := m.Connector.Connect(ctx)
 	if err != nil {
@@ -92,38 +81,57 @@ func (m Migrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyRes
 		return nil, err
 	}
 
+	executed := make([]string, 0, len(stmts))
 	for _, st := range stmts {
 		if _, err = tx.Exec(ctx, st.SQL); err != nil {
-			se := &StatementError{Index: st.Index, Err: err, Message: err.Error()}
-			var pe *pgconn.PgError
-			if errors.As(err, &pe) {
-				se.SQLState = pe.Code
-				se.Message = pe.Message
-				se.Detail = pe.Detail
-				se.Hint = pe.Hint
-				se.Position = int(pe.Position)
-			}
-			return nil, se
+			return nil, statementError(st.Index, st.SQL, err)
 		}
+		executed = append(executed, st.SQL)
 	}
 	_, err = tx.Exec(ctx, `
         CREATE TABLE IF NOT EXISTS _dbmp_schema_history (
           run_id BIGINT PRIMARY KEY, migration_id BIGINT NOT NULL, version INTEGER NOT NULL,
-          checksum BYTEA NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+          checksum BYTEA NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+          direction TEXT NOT NULL DEFAULT 'up'
         )`)
 	if err != nil {
 		return nil, fmt.Errorf("create target migration history: %w", err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO _dbmp_schema_history(run_id,migration_id,version,checksum) VALUES($1,$2,$3,$4)`,
-		in.RunID, in.MigrationID, in.Version, in.Checksum)
+	_, err = tx.Exec(ctx, `ALTER TABLE _dbmp_schema_history ADD COLUMN IF NOT EXISTS direction TEXT NOT NULL DEFAULT 'up'`)
+	if err != nil {
+		return nil, fmt.Errorf("upgrade target migration history: %w", err)
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO _dbmp_schema_history(run_id,migration_id,version,checksum,direction) VALUES($1,$2,$3,$4,$5)`,
+		in.RunID, in.MigrationID, in.Version, in.Checksum, string(direction))
 	if err != nil {
 		return nil, fmt.Errorf("write target migration history: %w", err)
 	}
-	if err = tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit migration: %w", err)
-	}
 	committed = true
-	return &dbms.ApplyResult{StatementsExecuted: len(stmts), AppliedAt: time.Now().UTC()}, nil
+	if err = tx.Commit(ctx); err != nil {
+		return nil, commitError(err)
+	}
+	return &dbms.ApplyResult{StatementsExecuted: len(stmts), Statements: executed, AppliedAt: time.Now().UTC()}, nil
+}
+
+func statementError(index int, sql string, err error) *StatementError {
+	se := &StatementError{Index: index, SQL: sql, Err: err, Message: err.Error()}
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		se.SQLState = pe.Code
+		se.Message = pe.Message
+		se.Detail = pe.Detail
+		se.Hint = pe.Hint
+		se.Position = int(pe.Position)
+	}
+	return se
+}
+
+func commitError(err error) error {
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		return statementError(0, "COMMIT", err)
+	}
+	return fmt.Errorf("%w: %w", dbms.ErrCommitUncertain, err)
 }
 
 var ErrLockBusy = errors.New("target database already has a migration running")

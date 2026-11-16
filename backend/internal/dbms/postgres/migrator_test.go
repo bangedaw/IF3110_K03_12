@@ -145,3 +145,113 @@ func TestMigratorCommittedVersionReflectsTargetHistory(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, found)
 }
+
+func run(t *testing.T, m dbms.Migrator, in dbms.ApplyInput) (*dbms.ApplyResult, error) {
+	t.Helper()
+	if in.DatabaseID == 0 {
+		in.DatabaseID = 1
+	}
+	if in.MigrationID == 0 {
+		in.MigrationID = 1
+	}
+	in.Checksum = []byte("sum")
+	return m.Apply(context.Background(), in)
+}
+
+func historyDirection(t *testing.T, pool *pgxpool.Pool, runID int64) string {
+	t.Helper()
+	var direction string
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT direction FROM _dbmp_schema_history WHERE run_id = $1`, runID).Scan(&direction))
+	return direction
+}
+
+func TestMigratorRunsUpThenDownAndRecordsDirection(t *testing.T) {
+	m, pool := migratorFixture(t)
+
+	up, err := run(t, m, dbms.ApplyInput{RunID: 41, Version: 1, SQL: "CREATE TABLE app.toggles (id int); INSERT INTO app.toggles VALUES (1);"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"CREATE TABLE app.toggles (id int)", "INSERT INTO app.toggles VALUES (1)"}, up.Statements)
+	assert.True(t, tableExists(t, pool, "app.toggles"))
+
+	down, err := run(t, m, dbms.ApplyInput{RunID: 42, Version: 1, Direction: dbms.DirectionDown, SQL: "DROP TABLE app.toggles;"})
+	require.NoError(t, err)
+	assert.Equal(t, 1, down.StatementsExecuted)
+	assert.False(t, tableExists(t, pool, "app.toggles"))
+
+	assert.Equal(t, "up", historyDirection(t, pool, 41))
+	assert.Equal(t, "down", historyDirection(t, pool, 42))
+	version, found, err := m.CommittedVersion(context.Background(), 42)
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Equal(t, 1, version)
+}
+
+func TestMigratorFailedDownKeepsEverythingAndReportsStatement(t *testing.T) {
+	m, pool := migratorFixture(t)
+	_, err := run(t, m, dbms.ApplyInput{RunID: 43, Version: 1, SQL: "CREATE TABLE app.keep_me (id int); CREATE TABLE app.keep_too (id int);"})
+	require.NoError(t, err)
+
+	_, err = run(t, m, dbms.ApplyInput{RunID: 44, Version: 1, Direction: dbms.DirectionDown,
+		SQL: "DROP TABLE app.keep_me; DROP TABLE app.tidak_ada; DROP TABLE app.keep_too;"})
+
+	var se *dbms.StatementError
+	require.ErrorAs(t, err, &se)
+	assert.Equal(t, 2, se.Index)
+	assert.Equal(t, "DROP TABLE app.tidak_ada", se.SQL)
+	assert.Equal(t, "42P01", se.SQLState)
+	assert.NotErrorIs(t, err, dbms.ErrCommitUncertain)
+	assert.True(t, tableExists(t, pool, "app.keep_me"), "statement pertama ikut dibatalkan")
+	assert.True(t, tableExists(t, pool, "app.keep_too"))
+	_, found, err := m.CommittedVersion(context.Background(), 44)
+	require.NoError(t, err)
+	assert.False(t, found)
+}
+
+func TestMigratorRejectsUnknownDirectionBeforeTouchingTarget(t *testing.T) {
+	m, pool := migratorFixture(t)
+
+	_, err := run(t, m, dbms.ApplyInput{RunID: 45, Version: 1, Direction: "sideways", SQL: "CREATE TABLE app.never (id int)"})
+
+	assert.ErrorIs(t, err, dbms.ErrInvalidDirection)
+	assert.False(t, tableExists(t, pool, "app.never"))
+}
+
+func TestMigratorUpgradesHistoryTableFromMilestoneOne(t *testing.T) {
+	m, pool := migratorFixture(t)
+	_, err := pool.Exec(context.Background(), `
+		CREATE TABLE _dbmp_schema_history (
+		  run_id BIGINT PRIMARY KEY, migration_id BIGINT NOT NULL, version INTEGER NOT NULL,
+		  checksum BYTEA NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		);
+		INSERT INTO _dbmp_schema_history(run_id, migration_id, version, checksum) VALUES (40, 1, 1, 'x');`)
+	require.NoError(t, err)
+
+	_, err = run(t, m, dbms.ApplyInput{RunID: 46, Version: 2, Direction: dbms.DirectionDown, SQL: "CREATE TABLE app.upgraded (id int)"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "up", historyDirection(t, pool, 40), "baris M1 dianggap up")
+	assert.Equal(t, "down", historyDirection(t, pool, 46))
+}
+
+func TestMigratorDeferredConstraintFailingAtCommitIsCertain(t *testing.T) {
+	m, pool := migratorFixture(t)
+	_, err := pool.Exec(context.Background(), `
+		CREATE TABLE app.parents (id int PRIMARY KEY);
+		CREATE TABLE app.children (id int, parent_id int REFERENCES app.parents(id) DEFERRABLE INITIALLY DEFERRED);`)
+	require.NoError(t, err)
+
+	_, err = run(t, m, dbms.ApplyInput{RunID: 47, Version: 1, SQL: "INSERT INTO app.children VALUES (1, 99);"})
+
+	var se *dbms.StatementError
+	require.ErrorAs(t, err, &se)
+	assert.Equal(t, 0, se.Index)
+	assert.Equal(t, "COMMIT", se.SQL)
+	assert.Equal(t, "23503", se.SQLState)
+	assert.NotErrorIs(t, err, dbms.ErrCommitUncertain, "server menolak commit, jadi hasilnya pasti gagal")
+	var rows int
+	require.NoError(t, pool.QueryRow(context.Background(), `SELECT count(*) FROM app.children`).Scan(&rows))
+	assert.Zero(t, rows)
+	_, found, err := m.CommittedVersion(context.Background(), 47)
+	require.NoError(t, err)
+	assert.False(t, found)
+}
