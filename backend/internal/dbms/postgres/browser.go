@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
 const (
@@ -30,7 +31,7 @@ type Browser struct {
 var _ dbms.DataBrowser = (*Browser)(nil)
 
 func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, error) {
-	if excludedSchema(q.Schema) {
+	if excludedSchema(q.Schema) || schema.IsInternalTable(q.Table) {
 		return nil, dbms.ErrNotFound
 	}
 	limit, offset, err := normalizePage(q)

@@ -1,11 +1,20 @@
 package schema
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 const (
 	KindPostgres = "postgres"
 	KindMySQL    = "mysql"
 )
+
+const InternalTablePrefix = "_dbmp_"
+
+func IsInternalTable(name string) bool {
+	return strings.HasPrefix(name, InternalTablePrefix)
+}
 
 const (
 	TableKindTable = "table"

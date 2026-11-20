@@ -13,6 +13,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
 const (
@@ -31,7 +32,7 @@ type Browser struct {
 var _ dbms.DataBrowser = (*Browser)(nil)
 
 func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, error) {
-	if q.Schema != b.database || excludedSchema(q.Schema) {
+	if q.Schema != b.database || excludedSchema(q.Schema) || schema.IsInternalTable(q.Table) {
 		return nil, dbms.ErrNotFound
 	}
 	limit, offset, err := normalizePage(q)
