@@ -131,6 +131,10 @@ Mode batch dijalankan oleh `dbms.BatchMigrator` (implementasi PostgreSQL di
   dilakukan sebagai eksekusi baru. Migration tanpa SQL down ditolak.
 - Selama eksekusi, koneksi worker memegang advisory lock database target sehingga eksekusi lain pada
   database yang sama ditolak, termasuk di antara commit batch.
+- Riwayat dan checkpoint disimpan di tabel `_dbmp_schema_history`, `_dbmp_batch_run`, dan
+  `_dbmp_batch_checkpoint` pada database target. Prefix `_dbmp_` dicadangkan untuk platform: tabel
+  berawalan itu tidak tampil di explorer, tidak ikut snapshot, dan tidak pernah muncul di SQL schema
+  diff, sehingga sinkronisasi schema tidak bisa menghapus bukti eksekusi.
 
 ### Log dan span eksekusi SQL
 
