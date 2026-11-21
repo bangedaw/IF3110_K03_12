@@ -22,6 +22,7 @@ type Postgres struct{ q *gen.Queries }
 var (
 	_ Publisher = (*Postgres)(nil)
 	_ JobStore  = (*Postgres)(nil)
+	_ Locks     = (*Postgres)(nil)
 )
 
 func NewPostgres(db gen.DBTX) *Postgres { return &Postgres{q: gen.New(db)} }
@@ -134,4 +135,22 @@ func utc(t pgtype.Timestamptz) *time.Time {
 	}
 	v := t.Time.UTC()
 	return &v
+}
+
+func (p *Postgres) Defer(ctx context.Context, jobID int64, delay time.Duration) error {
+	return p.q.DeferJob(ctx, gen.DeferJobParams{ID: jobID, DelaySeconds: delay.Seconds()})
+}
+
+func (p *Postgres) Acquire(ctx context.Context, databaseID, jobID int64, owner string, ttl time.Duration) (bool, error) {
+	n, err := p.q.AcquireDatabaseLock(ctx, gen.AcquireDatabaseLockParams{DatabaseID: databaseID, JobID: jobID, Owner: owner, TtlSeconds: ttl.Seconds()})
+	return n == 1, err
+}
+
+func (p *Postgres) Renew(ctx context.Context, databaseID, jobID int64, owner string, ttl time.Duration) (bool, error) {
+	n, err := p.q.RenewDatabaseLock(ctx, gen.RenewDatabaseLockParams{DatabaseID: databaseID, JobID: jobID, Owner: owner, TtlSeconds: ttl.Seconds()})
+	return n == 1, err
+}
+
+func (p *Postgres) Release(ctx context.Context, databaseID, jobID int64, owner string) error {
+	return p.q.ReleaseDatabaseLock(ctx, gen.ReleaseDatabaseLockParams{DatabaseID: databaseID, JobID: jobID, Owner: owner})
 }

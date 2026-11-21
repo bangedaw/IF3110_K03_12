@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -29,6 +31,13 @@ type JobStore interface {
 	Claim(ctx context.Context) (*Job, error)
 	SaveProgress(ctx context.Context, jobID int64, progress dbms.BatchProgress) error
 	Complete(ctx context.Context, jobID int64, status JobStatus, lastError string) error
+	Defer(ctx context.Context, jobID int64, delay time.Duration) error
+}
+
+type Locks interface {
+	Acquire(ctx context.Context, databaseID, jobID int64, owner string, ttl time.Duration) (bool, error)
+	Renew(ctx context.Context, databaseID, jobID int64, owner string, ttl time.Duration) (bool, error)
+	Release(ctx context.Context, databaseID, jobID int64, owner string) error
 }
 
 type Targets interface {
@@ -36,13 +45,22 @@ type Targets interface {
 }
 
 type Worker struct {
-	Jobs         JobStore
-	Lifecycle    Lifecycle
-	Targets      Targets
-	Logger       *slog.Logger
-	PollInterval time.Duration
-	Concurrency  int
+	Jobs           JobStore
+	Locks          Locks
+	Lifecycle      Lifecycle
+	Targets        Targets
+	Logger         *slog.Logger
+	ID             string
+	PollInterval   time.Duration
+	LockTTL        time.Duration
+	LockRetryDelay time.Duration
+	Concurrency    int
 }
+
+var defaultOwner = func() string {
+	host, _ := os.Hostname()
+	return host + ":" + strconv.Itoa(os.Getpid())
+}()
 
 var tracer = otel.Tracer("github.com/bangedaw/IF3110_K03_12/backend/internal/queue")
 
@@ -105,16 +123,30 @@ func (w *Worker) process(ctx context.Context, job *Job) {
 	log := w.logger()
 	log.InfoContext(ctx, "job.start", "event", "job.start", "status", "running")
 
-	exec, err := w.Lifecycle.Start(ctx, StartInput{RequestID: job.RequestID, JobID: job.ID, ActorID: job.ActorID, Attempt: job.Attempt})
-	if err != nil {
-		w.complete(ctx, job, JobFailed, fmt.Errorf("revalidasi: %w", err), start)
+	if !w.acquire(ctx, job) {
 		return
 	}
+	execCtx, stopHeartbeat := w.holdLock(ctx, job)
+	end := func(status JobStatus, err error) {
+		stopHeartbeat()
+		w.complete(ctx, job, status, err, start)
+		if err := w.Locks.Release(ctx, job.DatabaseID, job.ID, w.owner()); err != nil {
+			log.ErrorContext(ctx, "lock.release", "event", "lock.release", "status", "error", "error", err.Error())
+		}
+	}
+
+	exec, err := w.Lifecycle.Start(execCtx, StartInput{RequestID: job.RequestID, JobID: job.ID, ActorID: job.ActorID, Attempt: job.Attempt})
+	if err != nil {
+		end(JobFailed, fmt.Errorf("revalidasi: %w", err))
+		return
+	}
+	execCtx = sqltrace.With(execCtx, slog.Int64("run_id", exec.RunID), slog.Int64("migration_id", exec.MigrationID))
 	ctx = sqltrace.With(ctx, slog.Int64("run_id", exec.RunID), slog.Int64("migration_id", exec.MigrationID))
 
-	progress, runErr := w.execute(ctx, job, exec)
+	progress, runErr := w.execute(execCtx, job, exec)
 	if errors.Is(runErr, dbms.ErrCommitUncertain) {
-		// shortcut: job dibiarkan running tanpa Finish; pemulihan di M-3 memeriksa ulang bukti commit sebelum memutuskan.
+		// Lock tidak dilepas: lease kedaluwarsa tetapi job tetap running, sehingga migration lain di database ini tertahan sampai pemulihan memeriksa bukti commit.
+		stopHeartbeat()
 		span.SetStatus(codes.Error, runErr.Error())
 		log.ErrorContext(ctx, "job.uncertain", "event", "job.uncertain", "status", "uncertain", "error", runErr.Error())
 		return
@@ -122,7 +154,64 @@ func (w *Worker) process(ctx context.Context, job *Job) {
 	if err := w.Lifecycle.Finish(ctx, FinishInput{RunID: exec.RunID, Err: runErr, Progress: progress}); err != nil {
 		log.ErrorContext(ctx, "job.record", "event", "job.record", "status", "error", "error", err.Error())
 	}
-	w.complete(ctx, job, outcome(runErr, progress), runErr, start)
+	end(outcome(runErr, progress), runErr)
+}
+
+func (w *Worker) acquire(ctx context.Context, job *Job) bool {
+	ctx, span := tracer.Start(ctx, "queue.lock")
+	defer span.End()
+	held, err := w.Locks.Acquire(ctx, job.DatabaseID, job.ID, w.owner(), w.lockTTL())
+	span.SetAttributes(attribute.Bool("lock.acquired", held))
+	log := w.logger()
+	switch {
+	case err != nil:
+		span.SetStatus(codes.Error, err.Error())
+		log.ErrorContext(ctx, "lock.acquire", "event", "lock.acquire", "status", "error", "error", err.Error())
+	case held:
+		log.InfoContext(ctx, "lock.acquire", "event", "lock.acquire", "status", "acquired")
+		return true
+	default:
+		log.InfoContext(ctx, "lock.acquire", "event", "lock.acquire", "status", "busy")
+	}
+	if err := w.Jobs.Defer(ctx, job.ID, w.lockRetryDelay()); err != nil {
+		log.ErrorContext(ctx, "job.defer", "event", "job.defer", "status", "error", "error", err.Error())
+	}
+	return false
+}
+
+// holdLock memperpanjang lease selama job berjalan. Jika lease tidak bisa diperpanjang, eksekusi dibatalkan
+// supaya worker tidak lanjut mengubah database yang lock-nya mungkin sudah dipegang worker lain.
+func (w *Worker) holdLock(ctx context.Context, job *Job) (context.Context, func()) {
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	stopped := make(chan struct{})
+	ttl := w.lockTTL()
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(ttl / 3)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				ok, err := w.Locks.Renew(context.WithoutCancel(ctx), job.DatabaseID, job.ID, w.owner(), ttl)
+				if err != nil || !ok {
+					w.logger().ErrorContext(ctx, "lock.renew", "event", "lock.renew", "status", "lost", "error", fmt.Sprint(err))
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	var once sync.Once
+	return ctx, func() {
+		once.Do(func() {
+			close(done)
+			<-stopped
+			cancel()
+		})
+	}
 }
 
 func (w *Worker) execute(ctx context.Context, job *Job, exec *Execution) (*dbms.BatchProgress, error) {
@@ -148,7 +237,7 @@ func (w *Worker) execute(ctx context.Context, job *Job, exec *Execution) (*dbms.
 		return nil, errors.New("database target tidak mendukung migration per batch")
 	}
 	onBatch := func(p dbms.BatchProgress) {
-		if err := w.Jobs.SaveProgress(ctx, job.ID, p); err != nil {
+		if err := w.Jobs.SaveProgress(context.WithoutCancel(ctx), job.ID, p); err != nil {
 			w.logger().WarnContext(ctx, "job.progress", "event", "job.progress", "status", "error", "error", err.Error())
 		}
 	}
@@ -199,6 +288,27 @@ func (w *Worker) complete(ctx context.Context, job *Job, status JobStatus, runEr
 		attrs = append(attrs, "error", lastError)
 	}
 	w.logger().Log(ctx, level, "job.end", attrs...)
+}
+
+func (w *Worker) owner() string {
+	if w.ID != "" {
+		return w.ID
+	}
+	return defaultOwner
+}
+
+func (w *Worker) lockTTL() time.Duration {
+	if w.LockTTL > 0 {
+		return w.LockTTL
+	}
+	return 30 * time.Second
+}
+
+func (w *Worker) lockRetryDelay() time.Duration {
+	if w.LockRetryDelay > 0 {
+		return w.LockRetryDelay
+	}
+	return 5 * time.Second
 }
 
 func (w *Worker) logger() *slog.Logger {

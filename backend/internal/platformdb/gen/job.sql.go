@@ -70,6 +70,24 @@ func (q *Queries) CompleteJob(ctx context.Context, arg CompleteJobParams) error 
 	return err
 }
 
+const deferJob = `-- name: DeferJob :exec
+UPDATE jobs
+SET status    = 'pending',
+    attempts  = attempts - 1,
+    run_after = now() + make_interval(secs => $1::float8)
+WHERE id = $2 AND status = 'running'
+`
+
+type DeferJobParams struct {
+	DelaySeconds float64
+	ID           int64
+}
+
+func (q *Queries) DeferJob(ctx context.Context, arg DeferJobParams) error {
+	_, err := q.db.Exec(ctx, deferJob, arg.DelaySeconds, arg.ID)
+	return err
+}
+
 const getJob = `-- name: GetJob :one
 SELECT id, request_id, database_id, status, attempts, max_attempts, run_after, trace_context, batches_committed, rows_committed, last_error, created_by, created_at, started_at, finished_at FROM jobs WHERE id = $1 AND database_id = $2
 `

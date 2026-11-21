@@ -43,3 +43,10 @@ WHERE id = @id AND status = 'running';
 
 -- name: GetJob :one
 SELECT * FROM jobs WHERE id = @id AND database_id = @database_id;
+
+-- name: DeferJob :exec
+UPDATE jobs
+SET status    = 'pending',
+    attempts  = attempts - 1,
+    run_after = now() + make_interval(secs => @delay_seconds::float8)
+WHERE id = @id AND status = 'running';

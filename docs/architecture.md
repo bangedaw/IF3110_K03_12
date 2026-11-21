@@ -129,8 +129,7 @@ Dipanggil worker, diimplementasi driver PostgreSQL. Fake untuk keduanya: `dbms.F
     yang sama melanjutkan dari checkpoint.
   - `RevertBatches` menerima `RunID` eksekusi yang dibatalkan dan `ByRunID` eksekusi rollback-nya.
   - `BatchProgress.State()` menghasilkan `partial`, `completed`, `partially_reverted`, atau `reverted`.
-  - `OnBatch` dipanggil setelah setiap batch ter-commit, untuk memperbarui progres job dan memperpanjang
-    lock database.
+  - `OnBatch` dipanggil setelah setiap batch ter-commit; worker memakainya untuk memperbarui progres job.
 
 Rincian mode batch dan hasil ujinya ada di README.
 
@@ -172,3 +171,17 @@ paket `queue` (pihak pemanggil) karena `migration` sudah mengimpor `queue` untuk
   ditandai gagal.
 - Jika hasil commit belum pasti (`dbms.ErrCommitUncertain`), worker memeriksa `CommittedVersion` lebih
   dulu dan baru memanggil `Finish` setelah hasilnya diketahui.
+
+### Lock per database
+
+Worker mengambil lock sebelum revalidasi dan eksekusi (`database_locks`, satu baris per database):
+
+- Lock berupa lease dengan TTL (default 30 detik) yang diperpanjang worker setiap sepertiga TTL selama job
+  berjalan, termasuk di antara commit batch. Jika perpanjangan gagal, eksekusi dibatalkan.
+- Jika database sedang dipakai, job dikembalikan ke antrean dengan jeda (default 5 detik) tanpa
+  menghabiskan jatah attempt.
+- Lease yang kedaluwarsa hanya boleh diambil alih jika job pemegangnya sudah tidak `running`. Job yang
+  masih `running` dengan lease kedaluwarsa berarti worker-nya mati atau hasil commit-nya belum pasti, dan
+  database itu tertahan sampai job tersebut dipulihkan.
+- Job `partial` menahan migration lain di database yang sama. Hanya job untuk migration yang sama
+  (melanjutkan atau membatalkan batch) yang boleh mengambil lock.
