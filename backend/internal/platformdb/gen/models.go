@@ -412,6 +412,7 @@ type Migration struct {
 	BatchTable         pgtype.Text
 	BatchColumn        pgtype.Text
 	BatchSize          pgtype.Int4
+	BatchSchema        pgtype.Text
 }
 
 type MigrationApproval struct {

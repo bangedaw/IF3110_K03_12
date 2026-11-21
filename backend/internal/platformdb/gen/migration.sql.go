@@ -43,7 +43,7 @@ func (q *Queries) CountMigrations(ctx context.Context, arg CountMigrationsParams
 const createMigrationDraft = `-- name: CreateMigrationDraft :one
 INSERT INTO migrations (database_id, title, description, sql_text, checksum, base_version, created_by, updated_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-RETURNING id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size
+RETURNING id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size, batch_schema
 `
 
 type CreateMigrationDraftParams struct {
@@ -90,6 +90,7 @@ func (q *Queries) CreateMigrationDraft(ctx context.Context, arg CreateMigrationD
 		&i.BatchTable,
 		&i.BatchColumn,
 		&i.BatchSize,
+		&i.BatchSchema,
 	)
 	return i, err
 }
@@ -184,7 +185,7 @@ func (q *Queries) GetDatabaseKind(ctx context.Context, id int64) (DbmsKind, erro
 }
 
 const getMigration = `-- name: GetMigration :one
-SELECT id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size FROM migrations WHERE id = $1 AND database_id = $2
+SELECT id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size, batch_schema FROM migrations WHERE id = $1 AND database_id = $2
 `
 
 type GetMigrationParams struct {
@@ -218,6 +219,7 @@ func (q *Queries) GetMigration(ctx context.Context, arg GetMigrationParams) (Mig
 		&i.BatchTable,
 		&i.BatchColumn,
 		&i.BatchSize,
+		&i.BatchSchema,
 	)
 	return i, err
 }
@@ -416,7 +418,7 @@ func (q *Queries) ListMigrationRuns(ctx context.Context, arg ListMigrationRunsPa
 }
 
 const listMigrations = `-- name: ListMigrations :many
-SELECT id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size FROM migrations
+SELECT id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size, batch_schema FROM migrations
 WHERE database_id = $1
   AND ($2::mig_status IS NULL OR status = $2::mig_status)
 ORDER BY version DESC NULLS FIRST, id DESC
@@ -467,6 +469,7 @@ func (q *Queries) ListMigrations(ctx context.Context, arg ListMigrationsParams) 
 			&i.BatchTable,
 			&i.BatchColumn,
 			&i.BatchSize,
+			&i.BatchSchema,
 		); err != nil {
 			return nil, err
 		}
@@ -614,7 +617,7 @@ SET title       = $1,
     revision    = revision + 1,
     updated_at  = now()
 WHERE id = $6 AND database_id = $7 AND status = 'draft' AND revision = $8
-RETURNING id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size
+RETURNING id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size, batch_schema
 `
 
 type UpdateMigrationDraftParams struct {
@@ -663,6 +666,7 @@ func (q *Queries) UpdateMigrationDraft(ctx context.Context, arg UpdateMigrationD
 		&i.BatchTable,
 		&i.BatchColumn,
 		&i.BatchSize,
+		&i.BatchSchema,
 	)
 	return i, err
 }

@@ -43,7 +43,8 @@ func TestM2SchemaConstraints(t *testing.T) {
 	require.NoError(t, pool.QueryRow(ctx, `INSERT INTO migrations (database_id, title, sql_text, checksum, created_by, updated_by)
 		VALUES ($1, 't', 'SELECT 1', '\x00', $2, $2) RETURNING id`, database, leader).Scan(&migration))
 	assert.Equal(t, "23514", sqlState(exec(`UPDATE migrations SET batch_column = 'id' WHERE id = $1`, migration)), "konfigurasi batch harus lengkap")
-	require.NoError(t, exec(`UPDATE migrations SET batch_table = 't', batch_column = 'id', batch_size = 100 WHERE id = $1`, migration))
+	assert.Equal(t, "23514", sqlState(exec(`UPDATE migrations SET batch_table = 't', batch_column = 'id', batch_size = 100 WHERE id = $1`, migration)), "schema batch wajib diisi")
+	require.NoError(t, exec(`UPDATE migrations SET batch_schema = 'app', batch_table = 't', batch_column = 'id', batch_size = 100 WHERE id = $1`, migration))
 
 	const newRequest = `INSERT INTO migration_requests (migration_id, database_id, kind, revision, requested_by) VALUES ($1, $2, 'apply', 1, $3) RETURNING id`
 	require.NoError(t, pool.QueryRow(ctx, newRequest, migration, database, leader).Scan(&request))
