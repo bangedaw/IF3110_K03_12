@@ -7,6 +7,8 @@ package gen
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const claimJob = `-- name: ClaimJob :one
@@ -49,6 +51,25 @@ func (q *Queries) ClaimJob(ctx context.Context) (ClaimJobRow, error) {
 	return i, err
 }
 
+const completeJob = `-- name: CompleteJob :exec
+UPDATE jobs
+SET status      = $1,
+    last_error  = $2,
+    finished_at = now()
+WHERE id = $3 AND status = 'running'
+`
+
+type CompleteJobParams struct {
+	Status    JobStatus
+	LastError pgtype.Text
+	ID        int64
+}
+
+func (q *Queries) CompleteJob(ctx context.Context, arg CompleteJobParams) error {
+	_, err := q.db.Exec(ctx, completeJob, arg.Status, arg.LastError, arg.ID)
+	return err
+}
+
 const requeueJob = `-- name: RequeueJob :exec
 UPDATE jobs
 SET status        = 'pending',
@@ -67,6 +88,24 @@ type RequeueJobParams struct {
 
 func (q *Queries) RequeueJob(ctx context.Context, arg RequeueJobParams) error {
 	_, err := q.db.Exec(ctx, requeueJob, arg.TraceContext, arg.ID)
+	return err
+}
+
+const saveJobProgress = `-- name: SaveJobProgress :exec
+UPDATE jobs
+SET batches_committed = $1,
+    rows_committed    = $2
+WHERE id = $3
+`
+
+type SaveJobProgressParams struct {
+	BatchesCommitted int32
+	RowsCommitted    int64
+	ID               int64
+}
+
+func (q *Queries) SaveJobProgress(ctx context.Context, arg SaveJobProgressParams) error {
+	_, err := q.db.Exec(ctx, saveJobProgress, arg.BatchesCommitted, arg.RowsCommitted, arg.ID)
 	return err
 }
 

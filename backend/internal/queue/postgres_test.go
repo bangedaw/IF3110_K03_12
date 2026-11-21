@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/queue"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/testutil"
 )
@@ -221,4 +222,30 @@ func TestClaimedJobRestoresTraceContext(t *testing.T) {
 	assert.Equal(t, sc.TraceID(), restored.TraceID())
 	assert.Equal(t, sc.SpanID(), restored.SpanID())
 	assert.True(t, restored.IsRemote(), "span asal dianggap berasal dari proses lain")
+}
+
+func TestProgressAndCompletionAreStoredOnTheJob(t *testing.T) {
+	pool := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	databaseID, userID := seedDatabase(t, pool)
+	q := queue.NewPostgres(pool)
+	id := publish(t, q, databaseID, userID, newRequest(t, pool, databaseID, userID))
+	_, err := q.Claim(ctx)
+	require.NoError(t, err)
+
+	require.NoError(t, q.SaveProgress(ctx, id, dbms.BatchProgress{BatchesCommitted: 5, RowsCommitted: 500, BatchesReverted: 2, RowsReverted: 200}))
+	require.NoError(t, q.Complete(ctx, id, queue.JobPartial, "batch 6 gagal"))
+	require.NoError(t, q.Complete(ctx, id, queue.JobSucceeded, ""), "job yang sudah selesai tidak diubah")
+
+	var status, lastError string
+	var batches int
+	var rows int64
+	var finished bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT status::text, last_error, batches_committed, rows_committed, finished_at IS NOT NULL FROM jobs WHERE id = $1`, id).
+		Scan(&status, &lastError, &batches, &rows, &finished))
+	assert.Equal(t, "partial", status)
+	assert.Equal(t, "batch 6 gagal", lastError)
+	assert.Equal(t, 3, batches, "batch yang masih ter-commit setelah dikurangi yang dibatalkan")
+	assert.Equal(t, int64(300), rows)
+	assert.True(t, finished)
 }

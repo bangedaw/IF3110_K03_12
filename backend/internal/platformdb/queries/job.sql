@@ -27,3 +27,16 @@ WHERE id = (
     FOR UPDATE SKIP LOCKED
 )
 RETURNING id, request_id, database_id, created_by, attempts, max_attempts, trace_context;
+
+-- name: SaveJobProgress :exec
+UPDATE jobs
+SET batches_committed = @batches_committed,
+    rows_committed    = @rows_committed
+WHERE id = @id;
+
+-- name: CompleteJob :exec
+UPDATE jobs
+SET status      = @status,
+    last_error  = sqlc.narg('last_error'),
+    finished_at = now()
+WHERE id = @id AND status = 'running';

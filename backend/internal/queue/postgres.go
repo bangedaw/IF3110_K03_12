@@ -7,14 +7,19 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"go.opentelemetry.io/otel/propagation"
 
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 )
 
 type Postgres struct{ q *gen.Queries }
 
-var _ Publisher = (*Postgres)(nil)
+var (
+	_ Publisher = (*Postgres)(nil)
+	_ JobStore  = (*Postgres)(nil)
+)
 
 func NewPostgres(db gen.DBTX) *Postgres { return &Postgres{q: gen.New(db)} }
 
@@ -75,4 +80,20 @@ func (p *Postgres) Claim(ctx context.Context) (*Job, error) {
 		MaxAttempts: int(row.MaxAttempts),
 		carrier:     carrier,
 	}, nil
+}
+
+func (p *Postgres) SaveProgress(ctx context.Context, jobID int64, progress dbms.BatchProgress) error {
+	return p.q.SaveJobProgress(ctx, gen.SaveJobProgressParams{
+		ID:               jobID,
+		BatchesCommitted: int32(progress.BatchesCommitted - progress.BatchesReverted),
+		RowsCommitted:    progress.RowsCommitted - progress.RowsReverted,
+	})
+}
+
+func (p *Postgres) Complete(ctx context.Context, jobID int64, status JobStatus, lastError string) error {
+	return p.q.CompleteJob(ctx, gen.CompleteJobParams{
+		ID:        jobID,
+		Status:    gen.JobStatus(status),
+		LastError: pgtype.Text{String: lastError, Valid: lastError != ""},
+	})
 }
