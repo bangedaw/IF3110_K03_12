@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"go.opentelemetry.io/otel/propagation"
 
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apigen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 )
@@ -96,4 +99,39 @@ func (p *Postgres) Complete(ctx context.Context, jobID int64, status JobStatus, 
 		Status:    gen.JobStatus(status),
 		LastError: pgtype.Text{String: lastError, Valid: lastError != ""},
 	})
+}
+
+func (p *Postgres) Get(ctx context.Context, databaseID, jobID int64) (apigen.Job, error) {
+	j, err := p.q.GetJob(ctx, gen.GetJobParams{ID: jobID, DatabaseID: databaseID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return apigen.Job{}, apperr.ErrNotFound
+	}
+	if err != nil {
+		return apigen.Job{}, err
+	}
+	out := apigen.Job{
+		Id:               j.ID,
+		RequestId:        j.RequestID,
+		DatabaseId:       j.DatabaseID,
+		Status:           apigen.JobStatus(j.Status),
+		Attempts:         int(j.Attempts),
+		MaxAttempts:      int(j.MaxAttempts),
+		BatchesCommitted: int(j.BatchesCommitted),
+		RowsCommitted:    j.RowsCommitted,
+		CreatedAt:        j.CreatedAt.Time.UTC(),
+		StartedAt:        utc(j.StartedAt),
+		FinishedAt:       utc(j.FinishedAt),
+	}
+	if j.LastError.Valid {
+		out.LastError = &j.LastError.String
+	}
+	return out, nil
+}
+
+func utc(t pgtype.Timestamptz) *time.Time {
+	if !t.Valid {
+		return nil
+	}
+	v := t.Time.UTC()
+	return &v
 }

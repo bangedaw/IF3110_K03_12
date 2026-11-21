@@ -70,6 +70,38 @@ func (q *Queries) CompleteJob(ctx context.Context, arg CompleteJobParams) error 
 	return err
 }
 
+const getJob = `-- name: GetJob :one
+SELECT id, request_id, database_id, status, attempts, max_attempts, run_after, trace_context, batches_committed, rows_committed, last_error, created_by, created_at, started_at, finished_at FROM jobs WHERE id = $1 AND database_id = $2
+`
+
+type GetJobParams struct {
+	ID         int64
+	DatabaseID int64
+}
+
+func (q *Queries) GetJob(ctx context.Context, arg GetJobParams) (Job, error) {
+	row := q.db.QueryRow(ctx, getJob, arg.ID, arg.DatabaseID)
+	var i Job
+	err := row.Scan(
+		&i.ID,
+		&i.RequestID,
+		&i.DatabaseID,
+		&i.Status,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.RunAfter,
+		&i.TraceContext,
+		&i.BatchesCommitted,
+		&i.RowsCommitted,
+		&i.LastError,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const requeueJob = `-- name: RequeueJob :exec
 UPDATE jobs
 SET status        = 'pending',

@@ -26,6 +26,7 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/migration"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/queue"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/spa"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqltrace"
@@ -130,6 +131,7 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, ui f
 			admin.Routes(p, adminSvc)
 			dbconn.Routes(p, connSvc)
 			explorer.Routes(p, explorerSvc)
+			queue.Routes(p, queue.Handler{Jobs: queue.NewPostgres(pool), Authz: az})
 		})
 	})
 	if h, ok := spa.Handler(ui); ok {

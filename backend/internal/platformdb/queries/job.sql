@@ -40,3 +40,6 @@ SET status      = @status,
     last_error  = sqlc.narg('last_error'),
     finished_at = now()
 WHERE id = @id AND status = 'running';
+
+-- name: GetJob :one
+SELECT * FROM jobs WHERE id = @id AND database_id = @database_id;

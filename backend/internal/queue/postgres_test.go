@@ -12,6 +12,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apigen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/queue"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/testutil"
@@ -248,4 +250,22 @@ func TestProgressAndCompletionAreStoredOnTheJob(t *testing.T) {
 	assert.Equal(t, 3, batches, "batch yang masih ter-commit setelah dikurangi yang dibatalkan")
 	assert.Equal(t, int64(300), rows)
 	assert.True(t, finished)
+}
+
+func TestGetReturnsJobOnlyForItsDatabase(t *testing.T) {
+	pool := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	databaseID, userID := seedDatabase(t, pool)
+	q := queue.NewPostgres(pool)
+	id := publish(t, q, databaseID, userID, newRequest(t, pool, databaseID, userID))
+
+	job, err := q.Get(ctx, databaseID, id)
+	require.NoError(t, err)
+	assert.Equal(t, apigen.Pending, job.Status)
+	assert.Equal(t, 3, job.MaxAttempts)
+	assert.Nil(t, job.StartedAt)
+	assert.Nil(t, job.LastError)
+
+	_, err = q.Get(ctx, databaseID+1, id)
+	assert.ErrorIs(t, err, apperr.ErrNotFound)
 }
