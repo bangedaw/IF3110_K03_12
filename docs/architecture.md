@@ -146,6 +146,9 @@ paket `queue`. Fake: `queue.Fake`.
   eksekusi ganda. Jika job itu berstatus gagal atau partial, `Publish` mengantrekannya kembali untuk
   dilanjutkan dari checkpoint.
 - Trace context diambil dari `ctx` dan disimpan di job, lalu dilanjutkan oleh worker.
+- Implementasi: `queue.NewPostgres(db)`. `Publish` hanya menulis tabel `jobs`; status request tetap
+  diubah service migration. `db` boleh berupa `pgx.Tx`, sehingga perubahan status request menjadi
+  `queued` dan pembuatan job bisa di-commit dalam satu transaction.
 
 ### `queue.Lifecycle`: siklus satu eksekusi
 
