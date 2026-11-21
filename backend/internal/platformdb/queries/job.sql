@@ -13,3 +13,17 @@ SET status        = 'pending',
     finished_at   = NULL,
     trace_context = @trace_context
 WHERE id = @id AND status IN ('failed', 'partial');
+
+-- name: ClaimJob :one
+UPDATE jobs
+SET status     = 'running',
+    attempts   = attempts + 1,
+    started_at = COALESCE(started_at, now())
+WHERE id = (
+    SELECT id FROM jobs
+    WHERE status = 'pending' AND run_after <= now()
+    ORDER BY run_after, id
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, request_id, database_id, created_by, attempts, max_attempts, trace_context;

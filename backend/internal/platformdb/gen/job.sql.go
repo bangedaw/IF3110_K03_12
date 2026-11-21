@@ -9,6 +9,46 @@ import (
 	"context"
 )
 
+const claimJob = `-- name: ClaimJob :one
+UPDATE jobs
+SET status     = 'running',
+    attempts   = attempts + 1,
+    started_at = COALESCE(started_at, now())
+WHERE id = (
+    SELECT id FROM jobs
+    WHERE status = 'pending' AND run_after <= now()
+    ORDER BY run_after, id
+    LIMIT 1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, request_id, database_id, created_by, attempts, max_attempts, trace_context
+`
+
+type ClaimJobRow struct {
+	ID           int64
+	RequestID    int64
+	DatabaseID   int64
+	CreatedBy    int64
+	Attempts     int32
+	MaxAttempts  int32
+	TraceContext []byte
+}
+
+func (q *Queries) ClaimJob(ctx context.Context) (ClaimJobRow, error) {
+	row := q.db.QueryRow(ctx, claimJob)
+	var i ClaimJobRow
+	err := row.Scan(
+		&i.ID,
+		&i.RequestID,
+		&i.DatabaseID,
+		&i.CreatedBy,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.TraceContext,
+	)
+	return i, err
+}
+
 const requeueJob = `-- name: RequeueJob :exec
 UPDATE jobs
 SET status        = 'pending',
