@@ -54,11 +54,17 @@ type query struct {
 }
 
 func With(ctx context.Context, attrs ...slog.Attr) context.Context {
-	prev, _ := ctx.Value(attrsKey{}).([]slog.Attr)
+	prev := Attrs(ctx)
 	merged := make([]slog.Attr, 0, len(prev)+len(attrs))
 	merged = append(merged, prev...)
 	merged = append(merged, attrs...)
 	return context.WithValue(ctx, attrsKey{}, merged)
+}
+
+// Attrs mengembalikan atribut korelasi yang dipasang lewat With.
+func Attrs(ctx context.Context) []slog.Attr {
+	attrs, _ := ctx.Value(attrsKey{}).([]slog.Attr)
+	return attrs
 }
 
 func Mask(sql string) string {
@@ -160,9 +166,7 @@ func (t Tracer) base(ctx context.Context, event, database, server string) []slog
 	if id := middleware.GetReqID(ctx); id != "" {
 		attrs = append(attrs, slog.String("request_id", id))
 	}
-	if extra, ok := ctx.Value(attrsKey{}).([]slog.Attr); ok {
-		attrs = append(attrs, extra...)
-	}
+	attrs = append(attrs, Attrs(ctx)...)
 	return attrs
 }
 

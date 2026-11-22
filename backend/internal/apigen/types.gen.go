@@ -58,6 +58,15 @@ const (
 	View  ExplorerTableSummaryKind = "view"
 )
 
+// Defines values for JobStatus.
+const (
+	Failed    JobStatus = "failed"
+	Partial   JobStatus = "partial"
+	Pending   JobStatus = "pending"
+	Running   JobStatus = "running"
+	Succeeded JobStatus = "succeeded"
+)
+
 // Defines values for ProblemCode.
 const (
 	CONFLICT         ProblemCode = "CONFLICT"
@@ -371,6 +380,28 @@ type GroupUpdate struct {
 	Name        *string `json:"name,omitempty"`
 }
 
+// Job defines model for Job.
+type Job struct {
+	// Attempts Jumlah attempt yang sudah dimulai
+	Attempts int `json:"attempts"`
+
+	// BatchesCommitted Batch yang saat ini ter-commit di database target (mode batch)
+	BatchesCommitted int        `json:"batchesCommitted"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	DatabaseId       int64      `json:"databaseId"`
+	FinishedAt       *time.Time `json:"finishedAt,omitempty"`
+	Id               int64      `json:"id"`
+	LastError        *string    `json:"lastError,omitempty"`
+	MaxAttempts      int        `json:"maxAttempts"`
+	RequestId        int64      `json:"requestId"`
+	RowsCommitted    int64      `json:"rowsCommitted"`
+	StartedAt        *time.Time `json:"startedAt,omitempty"`
+	Status           JobStatus  `json:"status"`
+}
+
+// JobStatus defines model for Job.Status.
+type JobStatus string
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Password string `json:"password"`
@@ -500,6 +531,9 @@ type DatabaseId = int64
 
 // GroupId defines model for GroupId.
 type GroupId = int64
+
+// JobId defines model for JobId.
+type JobId = int64
 
 // Limit defines model for Limit.
 type Limit = int

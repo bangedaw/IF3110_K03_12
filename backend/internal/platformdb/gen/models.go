@@ -387,6 +387,7 @@ type Job struct {
 	CreatedAt        pgtype.Timestamptz
 	StartedAt        pgtype.Timestamptz
 	FinishedAt       pgtype.Timestamptz
+	ClaimedAt        pgtype.Timestamptz
 }
 
 type Migration struct {
@@ -412,6 +413,7 @@ type Migration struct {
 	BatchTable         pgtype.Text
 	BatchColumn        pgtype.Text
 	BatchSize          pgtype.Int4
+	BatchSchema        pgtype.Text
 }
 
 type MigrationApproval struct {

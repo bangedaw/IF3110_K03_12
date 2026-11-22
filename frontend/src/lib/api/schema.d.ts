@@ -1354,6 +1354,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/databases/{databaseId}/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                databaseId: components["parameters"]["DatabaseId"];
+                jobId: components["parameters"]["JobId"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Status job eksekusi migration (terkunci pada database; lintas database -> 404)
+         * @description Butuh akses View Only atau View + Edit ke database. Dipakai SPA untuk memantau progres.
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    databaseId: components["parameters"]["DatabaseId"];
+                    jobId: components["parameters"]["JobId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Job"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/databases/{databaseId}/schema-diff": {
         parameters: {
             query?: never;
@@ -1697,6 +1745,30 @@ export interface components {
             takenAt: string;
             model: components["schemas"]["ExplorerSchemaModel"];
         };
+        Job: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            requestId: number;
+            /** Format: int64 */
+            databaseId: number;
+            /** @enum {string} */
+            status: "pending" | "running" | "succeeded" | "failed" | "partial";
+            /** @description Jumlah attempt yang sudah dimulai */
+            attempts: number;
+            maxAttempts: number;
+            /** @description Batch yang saat ini ter-commit di database target (mode batch) */
+            batchesCommitted: number;
+            /** Format: int64 */
+            rowsCommitted: number;
+            lastError?: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            startedAt?: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
         SchemaDiffRequest: {
             against: {
                 /** @enum {string} */
@@ -1799,6 +1871,7 @@ export interface components {
         OrderBy: string;
         OrderDir: "asc" | "desc";
         SnapshotId: number;
+        JobId: number;
     };
     requestBodies: never;
     headers: never;
