@@ -223,4 +223,26 @@ describe("leader group", () => {
 
     expect(await screen.findByText(/belum punya leader/)).toHaveAttribute("role", "status")
   })
+
+  it("menampilkan penolakan backend saat menambah akses untuk group tanpa leader", async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.get("/api/admin/groups/8", () =>
+        HttpResponse.json({ id: 8, name: "lama", description: "", createdAt: base.createdAt, leaderId: null, leaderUsername: null, members: [alice] }),
+      ),
+      http.get("/api/admin/groups/8/grants", () => HttpResponse.json({ items: [] })),
+      http.get("/api/admin/users", () => HttpResponse.json({ items: [admin, alice], limit: 200, offset: 0, total: 2 })),
+      http.put("/api/admin/groups/8/grants/:databaseId", () =>
+        HttpResponse.json(
+          { type: "about:blank", title: "Conflict", status: 409, code: "CONFLICT", detail: "group belum punya leader; tunjuk leader sebelum menambah akses" },
+          { status: 409 },
+        ),
+      ),
+    )
+    renderRoute(<GroupDetailPage />, { path: "/admin/groups/:groupId", url: "/admin/groups/8" })
+
+    await user.selectOptions(await screen.findByLabelText("Akses inventory"), "view")
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("tunjuk leader sebelum menambah akses")
+  })
 })

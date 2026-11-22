@@ -107,9 +107,14 @@ func (s *Service) UpdateUser(ctx context.Context, p authz.Principal, id int64, i
 	var updated gen.User
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
-		before, err := q.GetUserByID(ctx, id)
+		before, err := q.LockUserForUpdate(ctx, id)
 		if err != nil {
 			return err
+		}
+		if before.IsActive && isFalse(in.IsActive) {
+			if err := leaderGuard(ctx, q, id, "menonaktifkannya"); err != nil {
+				return err
+			}
 		}
 		updated, err = q.UpdateUser(ctx, gen.UpdateUserParams{
 			ID:              id,
@@ -142,12 +147,22 @@ func (s *Service) DeleteUser(ctx context.Context, p authz.Principal, id int64) e
 	if id == p.UserID {
 		return apperr.New(apperr.CodeConflict, "tidak dapat menghapus akun sendiri")
 	}
-	n, err := s.q.DeleteUser(ctx, id)
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		if _, err := q.LockUserForUpdate(ctx, id); err != nil {
+			return err
+		}
+		if err := leaderGuard(ctx, q, id, "menghapusnya"); err != nil {
+			return err
+		}
+		_, err := q.DeleteUser(ctx, id)
+		return err
+	})
+	if isLeaderFK(err) {
+		return apperr.Wrap(apperr.CodeConflict, "user masih menjadi leader; tunjuk leader lain sebelum menghapusnya", err)
+	}
 	if err != nil {
 		return mapErr(err, "")
-	}
-	if n == 0 {
-		return apperr.ErrNotFound
 	}
 	s.record(ctx, p, "admin.user.delete", "user", id, nil)
 	return nil
@@ -232,7 +247,7 @@ func (s *Service) CreateGroup(ctx context.Context, p authz.Principal, in apigen.
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := s.q.WithTx(tx)
 		var err error
-		leader, err = q.GetUserByID(ctx, in.LeaderId)
+		leader, err = q.LockUserForShare(ctx, in.LeaderId)
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && !leader.IsActive {
 			return apperr.Validation(map[string]string{"leaderId": "harus user yang aktif"})
 		}
@@ -270,7 +285,7 @@ func (s *Service) SetLeader(ctx context.Context, p authz.Principal, groupID, use
 			return err
 		}
 		previous = before.Group.LeaderUserID
-		if leader, err = q.GetUserByID(ctx, userID); err != nil {
+		if leader, err = q.LockUserForShare(ctx, userID); err != nil {
 			return err
 		}
 		if !leader.IsActive {
@@ -377,6 +392,11 @@ func (s *Service) RemoveMember(ctx context.Context, p authz.Principal, groupID, 
 		return err
 	}
 	n, err := s.q.RemoveGroupMember(ctx, gen.RemoveGroupMemberParams{GroupID: groupID, UserID: userID})
+	if isLeaderFK(err) {
+		// Ditolak constraint groups_leader_is_member di database, jadi aman walaupun leader baru saja ditunjuk
+		// oleh request lain.
+		return apperr.Wrap(apperr.CodeConflict, "user adalah leader group ini; tunjuk leader lain sebelum mengeluarkannya", err)
+	}
 	if err != nil {
 		return err
 	}
@@ -420,11 +440,26 @@ func (s *Service) PutGrant(ctx context.Context, p authz.Principal, groupID, data
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		widens := old != newLevel && (old == "" || newLevel == gen.AccessLevelEdit)
+		if widens {
+			// Fail closed: tanpa leader, migration pada database ini tidak bisa disetujui siapa pun. Menurunkan
+			// atau mencabut akses tetap boleh.
+			g, err := q.GetGroupByID(ctx, groupID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return apperr.ErrNotFound
+			}
+			if err != nil {
+				return err
+			}
+			if !g.Group.LeaderUserID.Valid {
+				return apperr.New(apperr.CodeConflict, "group belum punya leader; tunjuk leader sebelum menambah akses")
+			}
+		}
 		row, err = q.UpsertGroupGrant(ctx, gen.UpsertGroupGrantParams{GroupID: groupID, DatabaseID: databaseID, Level: newLevel})
 		if err != nil {
 			return err
 		}
-		if old != newLevel && (old == "" || newLevel == gen.AccessLevelEdit) {
+		if widens {
 			return q.RequireRotationForGroup(ctx, groupID)
 		}
 		return nil
@@ -540,3 +575,21 @@ func deref(s *string) string {
 func isFalse(b *bool) bool { return b != nil && !*b }
 
 func now() pgtype.Timestamptz { return pgtype.Timestamptz{Time: time.Now(), Valid: true} }
+
+// leaderGuard menolak perubahan yang membuat group kehilangan leader. Pemanggil harus sudah memegang kunci
+// FOR UPDATE pada baris user, supaya user tidak ditunjuk sebagai leader di antara pemeriksaan dan perubahan.
+func leaderGuard(ctx context.Context, q *gen.Queries, userID int64, action string) error {
+	groups, err := q.ListGroupsLedBy(ctx, pgtype.Int8{Int64: userID, Valid: true})
+	if err != nil {
+		return err
+	}
+	if len(groups) > 0 {
+		return apperr.New(apperr.CodeConflict, "user masih menjadi leader group "+strings.Join(groups, ", ")+"; tunjuk leader lain sebelum "+action)
+	}
+	return nil
+}
+
+func isLeaderFK(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503" && pgErr.ConstraintName == "groups_leader_is_member"
+}

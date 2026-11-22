@@ -221,6 +221,7 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        /** @description Ditolak (409) untuk akun sendiri atau jika user masih menjadi leader group. */
         delete: {
             parameters: {
                 query?: never;
@@ -242,11 +243,12 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
             };
         };
         options?: never;
         head?: never;
-        /** @description Menonaktifkan user (isActive=false) me-revoke semua session-nya. */
+        /** @description Menonaktifkan user (isActive=false) me-revoke semua session-nya. Ditolak (409) jika user masih menjadi leader group. */
         patch: {
             parameters: {
                 query?: never;
@@ -274,6 +276,7 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
                 422: components["responses"]["ValidationFailed"];
             };
         };
@@ -564,7 +567,10 @@ export interface paths {
             };
         };
         post?: never;
-        /** Keluarkan user dari group */
+        /**
+         * Keluarkan user dari group
+         * @description Leader tidak bisa dikeluarkan (409) sebelum leader lain ditunjuk.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -587,6 +593,7 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
             };
         };
         options?: never;
@@ -700,7 +707,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set level akses group pada database (buat atau ubah) */
+        /**
+         * Set level akses group pada database (buat atau ubah)
+         * @description Menambah akses (grant baru atau naik ke edit) ditolak (409) untuk group yang belum punya leader, karena migration pada database itu tidak akan bisa disetujui. Menurunkan akses tetap boleh.
+         */
         put: {
             parameters: {
                 query?: never;
@@ -729,6 +739,7 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
                 422: components["responses"]["ValidationFailed"];
             };
         };

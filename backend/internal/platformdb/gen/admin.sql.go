@@ -302,6 +302,30 @@ func (q *Queries) ListGroups(ctx context.Context, arg ListGroupsParams) ([]ListG
 	return items, nil
 }
 
+const listGroupsLedBy = `-- name: ListGroupsLedBy :many
+SELECT name FROM groups WHERE leader_user_id = $1 ORDER BY name
+`
+
+func (q *Queries) ListGroupsLedBy(ctx context.Context, userID pgtype.Int8) ([]string, error) {
+	rows, err := q.db.Query(ctx, listGroupsLedBy, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUsers = `-- name: ListUsers :many
 SELECT id, username, display_name, password_hash, is_platform_admin, is_active, created_at, updated_at FROM users ORDER BY id LIMIT $2 OFFSET $1
 `
@@ -338,6 +362,49 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockUserForShare = `-- name: LockUserForShare :one
+SELECT id, username, display_name, password_hash, is_platform_admin, is_active, created_at, updated_at FROM users WHERE id = $1 FOR SHARE
+`
+
+func (q *Queries) LockUserForShare(ctx context.Context, id int64) (User, error) {
+	row := q.db.QueryRow(ctx, lockUserForShare, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.IsPlatformAdmin,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockUserForUpdate = `-- name: LockUserForUpdate :one
+
+SELECT id, username, display_name, password_hash, is_platform_admin, is_active, created_at, updated_at FROM users WHERE id = $1 FOR UPDATE
+`
+
+// Dua kunci berikut mencegah race antara menonaktifkan user dan menunjuknya sebagai leader: yang menonaktifkan
+// memegang FOR UPDATE, yang menunjuk memegang FOR SHARE, sehingga salah satunya selalu melihat hasil yang lain.
+func (q *Queries) LockUserForUpdate(ctx context.Context, id int64) (User, error) {
+	row := q.db.QueryRow(ctx, lockUserForUpdate, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.IsPlatformAdmin,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const removeGroupMember = `-- name: RemoveGroupMember :execrows

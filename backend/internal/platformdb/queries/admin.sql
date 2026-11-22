@@ -43,6 +43,18 @@ WHERE g.id = @id;
 -- name: SetGroupLeader :one
 UPDATE groups SET leader_user_id = @user_id WHERE id = @id RETURNING *;
 
+-- name: ListGroupsLedBy :many
+SELECT name FROM groups WHERE leader_user_id = @user_id ORDER BY name;
+
+-- Dua kunci berikut mencegah race antara menonaktifkan user dan menunjuknya sebagai leader: yang menonaktifkan
+-- memegang FOR UPDATE, yang menunjuk memegang FOR SHARE, sehingga salah satunya selalu melihat hasil yang lain.
+
+-- name: LockUserForUpdate :one
+SELECT * FROM users WHERE id = @id FOR UPDATE;
+
+-- name: LockUserForShare :one
+SELECT * FROM users WHERE id = @id FOR SHARE;
+
 -- name: CreateGroup :one
 INSERT INTO groups (name, description) VALUES (@name, @description) RETURNING *;
 
