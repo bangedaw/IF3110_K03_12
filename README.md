@@ -186,6 +186,7 @@ Di production set `APP_ENV=production` (cookie `Secure`, wajib di belakang HTTPS
 | `SESSION_ROTATION_INTERVAL` | `15m` | rotasi periodik |
 | `SESSION_GRACE_PERIOD` | `30s` | masa berlaku identifier lama setelah rotasi |
 | `SESSION_TOUCH_INTERVAL` | `60s` | throttle update aktivitas |
+| `OTEL_TRACES_EXPORTER` | `console` | `console` menulis span OpenTelemetry sebagai JSON ke stderr, `none` mematikannya |
 
 Untuk demo session, perpendek misalnya `SESSION_IDLE_TIMEOUT=1m SESSION_ROTATION_INTERVAL=20s`.
 
