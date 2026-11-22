@@ -105,3 +105,9 @@ export function useSetLeader(groupId: number) {
     unwrap(client.PUT("/api/admin/groups/{groupId}/leader", { params: { path: { groupId } }, body: { userId } })),
   )
 }
+
+export function useUpdateGroup(groupId: number) {
+  return useInvalidating(adminKeys.groups, (body: Schemas["GroupUpdate"]) =>
+    unwrap(client.PATCH("/api/admin/groups/{groupId}", { params: { path: { groupId } }, body })),
+  )
+}

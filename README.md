@@ -57,7 +57,9 @@ cd backend && go run ./cmd/dbmpctl seed-demo            # opsional: -password <s
 ```
 
 Perintah ini idempotent dan membuat akun berikut dengan password `demo12345`, tiga koneksi di atas,
-serta dua group (`backend-team`: alice, carol; `analyst`: bob, carol):
+serta dua group (`backend-team`: alice sebagai leader, carol; `analyst`: bob sebagai leader, carol).
+Migration pada `inventory` butuh persetujuan alice dan bob karena kedua group punya akses ke sana; carol
+anggota keduanya tetapi bukan leader, jadi tidak ikut menyetujui.
 
 | User | Akses efektif |
 |---|---|

@@ -246,3 +246,55 @@ describe("leader group", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("tunjuk leader sebelum menambah akses")
   })
 })
+
+describe("aksi admin M1 yang dilengkapi", () => {
+  it("mengubah nama tampilan user", async () => {
+    const user = userEvent.setup()
+    const calls: Call[] = []
+    server.use(
+      http.get("/api/admin/users", () => HttpResponse.json({ items: [admin, alice], limit: 200, offset: 0, total: 2 })),
+      http.patch("/api/admin/users/:id", async (ctx) => {
+        await record(calls)(ctx)
+        return HttpResponse.json({ ...alice, displayName: "Alice Backend" })
+      }),
+    )
+    renderRoute(withAuth(<UsersPage />), { path: "/admin/users", url: "/admin/users" })
+
+    const row = (await screen.findByText("alice")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Ubah nama" }))
+    await user.type(screen.getByLabelText("Nama tampilan alice"), "Alice Backend")
+    await user.click(within(row).getByRole("button", { name: "Simpan" }))
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Nama alice diperbarui")
+    expect(calls).toEqual([{ method: "PATCH", path: "/api/admin/users/2", body: { displayName: "Alice Backend" } }])
+  })
+
+  it("mengubah nama dan deskripsi group", async () => {
+    const user = userEvent.setup()
+    const calls: Call[] = []
+    server.use(
+      http.get("/api/admin/groups/7", () =>
+        HttpResponse.json({ id: 7, name: "analyst", description: "lama", createdAt: base.createdAt, leaderId: 2, leaderUsername: "alice", members: [alice] }),
+      ),
+      http.get("/api/admin/groups/7/grants", () => HttpResponse.json({ items: [] })),
+      http.get("/api/admin/users", () => HttpResponse.json({ items: [admin, alice], limit: 200, offset: 0, total: 2 })),
+      http.patch("/api/admin/groups/7", async (ctx) => {
+        await record(calls)(ctx)
+        return HttpResponse.json({ id: 7, name: "data-team", description: "baru", createdAt: base.createdAt, leaderId: 2, leaderUsername: "alice" })
+      }),
+    )
+    renderRoute(<GroupDetailPage />, { path: "/admin/groups/:groupId", url: "/admin/groups/7" })
+
+    await user.click(await screen.findByRole("button", { name: "Ubah nama" }))
+    const name = screen.getByLabelText("Nama group")
+    await user.clear(name)
+    await user.type(name, "data-team")
+    const description = screen.getByLabelText("Deskripsi")
+    await user.clear(description)
+    await user.type(description, "baru")
+    await user.click(screen.getByRole("button", { name: "Simpan" }))
+
+    await waitFor(() => expect(calls).toEqual([{ method: "PATCH", path: "/api/admin/groups/7", body: { name: "data-team", description: "baru" } }]))
+    await waitFor(() => expect(screen.queryByLabelText("Nama group")).not.toBeInTheDocument())
+  })
+})

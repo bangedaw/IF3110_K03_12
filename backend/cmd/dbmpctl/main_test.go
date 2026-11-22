@@ -100,6 +100,11 @@ func TestSeedDemoCreatesDemoScenarioAndIsIdempotent(t *testing.T) {
 	for _, db := range []string{"inventory", "staging", "sales"} {
 		assert.Equal(t, authz.LevelNone, effective(t, az, pool, "admin", db), "Platform Admin tidak otomatis punya akses data")
 	}
+
+	var leaders string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT string_agg(g.name || '=' || u.username, ',' ORDER BY g.name)
+		FROM groups g JOIN users u ON u.id = g.leader_user_id`).Scan(&leaders))
+	assert.Equal(t, "analyst=bob,backend-team=alice", leaders, "setiap group demo punya leader")
 }
 
 func TestSeedDemoAccountsCanLoginAndSecretsAreProtected(t *testing.T) {
