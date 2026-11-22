@@ -108,6 +108,89 @@ SPA (React + react-query)  →  handler (JSON)  →  service (logika + authz)  �
   dan jaminan bahwa log tidak pernah memuat password, cookie session, token CSRF, maupun query string.
 - Frontend: Vitest + Testing Library dengan MSW sebagai pengganti API.
 
+## Logging dan tracing
+
+Paket `internal/telemetry` memasang OpenTelemetry saat proses mulai (`telemetry.Setup`):
+
+- Propagator W3C (`traceparent`) dan TracerProvider dengan `service.name`.
+- Exporter diatur `OTEL_TRACES_EXPORTER`: `console` (default) menulis setiap span sebagai satu baris JSON
+  ke **stderr**, `none` mematikannya. Log tetap di **stdout**, jadi keduanya bisa dipisah.
+- Span ditulis lewat batcher dan dikirim saat proses berhenti, jadi proses yang mati mendadak bisa
+  kehilangan span terakhir. Log tidak terpengaruh.
+
+### Rantai trace
+
+Satu eksekusi migration berada di satu trace, walaupun API dan worker berjalan di proses berbeda:
+
+```
+POST /api/databases/{databaseId}/...        span server (httpx.Trace)
+├── sql.query ...                           query platform DB selama request (sqltrace)
+└── (jobs.trace_context: traceparent)       disimpan Publish, dibaca Claim
+    └── queue.job                           worker, induknya remote
+        ├── queue.lock                      pengambilan lock database
+        ├── sql.query ...                   revalidasi dan riwayat di platform DB
+        └── sql.query CREATE TABLE ...      SQL migration di database target
+```
+
+- Span HTTP dibuat untuk setiap request `/api` kecuali `/api/healthz`. Namanya memakai pola route chi,
+  bukan path asli, supaya ID tidak membuat nama span tak terbatas. Status 5xx menandai span error.
+- `trace_context` di job hanya berisi `traceparent`. Baggage dari client tidak ikut tersimpan.
+- Pemulihan membuat span `queue.recover` di trace asal job tersebut.
+- `TestOneTraceSpansFromAPIRequestToSQLInWorker` (paket `queue`) menguji rantai ini.
+- `cmd/worker` belum ada. Saat dibuat, binary itu harus memanggil `telemetry.Setup` dengan `service.name`
+  `dbmp-worker`, memakai `telemetry.NewHandler` untuk log, dan memasang `sqltrace.Tracer` di pool platform
+  DB maupun koneksi target, supaya span SQL di worker ikut tercatat.
+
+### Atribut log
+
+`telemetry.Handler` menambahkan atribut berikut ke setiap log yang ditulis dengan context, tanpa menimpa
+atribut yang sudah ditulis pemanggil:
+
+| Atribut | Sumber |
+|---|---|
+| `trace_id`, `span_id` | span aktif |
+| `request_id` | ID request HTTP (middleware chi) |
+| `actor` | user yang login, atau pembuat job di worker |
+| `job_id`, `migration_request_id`, `database_id`, `attempt` | worker, lewat `sqltrace.With` |
+| `run_id`, `migration_id` | worker, setelah `Lifecycle.Start` |
+
+Log memakai `event` dan `status` yang baku: `http`, `job.start`, `lock.acquire`, `job.retry`,
+`job.uncertain`, `job.abandon`, `job.recover`, `job.end`, dan `sql.query.start`/`sql.query.end` (juga
+`sql.begin`, `sql.commit`, `sql.rollback`).
+
+Contoh satu job (diringkas, satu baris per log):
+
+```json
+{"level":"INFO","msg":"http","method":"POST","path":"/api/databases/1/migrations/7/apply","route":"/api/databases/{databaseId}/migrations/{migrationId}/apply","status":202,"duration_ms":0,"request_id":"host/ygqdvzoFXP-000001","trace_id":"4468d7c57b9351619a40ad8bf4cc1914","span_id":"fcb930beb9612f62"}
+{"level":"INFO","msg":"job.start","event":"job.start","status":"running","trace_id":"4468d7c57b9351619a40ad8bf4cc1914","span_id":"e03429965e794401","job_id":10,"migration_request_id":20,"database_id":1,"actor":3,"attempt":1}
+{"level":"INFO","msg":"lock.acquire","event":"lock.acquire","status":"acquired","trace_id":"4468d7c57b9351619a40ad8bf4cc1914","span_id":"48a4d1bf9e47f7a7","job_id":10,"migration_request_id":20,"database_id":1,"actor":3,"attempt":1}
+{"level":"INFO","msg":"sql.query.end","event":"sql.query","target":"target","database":"inventory","server":"target-db:5432","job_id":10,"migration_request_id":20,"database_id":1,"actor":3,"attempt":1,"run_id":1,"migration_id":7,"query":"CREATE TABLE t ()","duration_ms":0.8,"rows":0,"status":"ok","trace_id":"4468d7c57b9351619a40ad8bf4cc1914","span_id":"ca4004a1c8cf50d1"}
+{"level":"INFO","msg":"job.end","event":"job.end","status":"succeeded","duration_ms":3,"trace_id":"4468d7c57b9351619a40ad8bf4cc1914","span_id":"e03429965e794401","job_id":10,"migration_request_id":20,"database_id":1,"actor":3,"attempt":1,"run_id":1,"migration_id":7}
+```
+
+Semua log satu eksekusi bisa dicari dengan `trace_id`-nya, misalnya
+`docker compose logs app | grep 4468d7c57b9351619a40ad8bf4cc1914`.
+
+Contoh span `queue.job` dari exporter console (diringkas):
+
+```json
+{"Name":"queue.job","SpanContext":{"TraceID":"4468d7c57b9351619a40ad8bf4cc1914","SpanID":"e03429965e794401"},"Parent":{"TraceID":"4468d7c57b9351619a40ad8bf4cc1914","SpanID":"fcb930beb9612f62","Remote":true},"SpanKind":1,"Attributes":[{"Key":"job.id","Value":{"Type":"INT64","Value":10}},{"Key":"job.migration_request_id","Value":{"Type":"INT64","Value":20}},{"Key":"job.database_id","Value":{"Type":"INT64","Value":1}},{"Key":"job.attempt","Value":{"Type":"INT64","Value":1}}],"Status":{"Code":"Unset"},"Resource":[{"Key":"service.name","Value":{"Type":"STRING","Value":"dbmp-server"}}]}
+```
+
+`Parent.SpanID` sama dengan `span_id` log `http` di atas, dan `Remote: true` menandakan induknya datang
+dari proses lain lewat tabel `jobs`.
+
+### Data sensitif
+
+- Span HTTP hanya mencatat method, path tanpa query string, route, status, dan request ID. Header,
+  cookie, dan body tidak pernah dicatat.
+- SQL di log dan span disamarkan `sqltrace.Mask` (`PASSWORD '***'`). Nilai parameter tidak dicatat,
+  kecuali `sqltrace.Tracer.LogArgs` dinyalakan (tidak dipakai di server).
+- `TestLogsAndSpansNeverContainSecrets` (`cmd/server`) menjalankan alur login, CSRF, koneksi database,
+  user, dan explorer dengan log dan exporter yang sama seperti production, lalu memastikan password,
+  cookie session, token CSRF, dan query string tidak muncul di log maupun span.
+  `TestTraceAndRequestLogNeverRecordCredentials` (`httpx`) memeriksa hal yang sama tanpa Docker.
+
 ## Kontrak antar ruas (Milestone 2)
 
 Tiga ruas pekerjaan (migration, queue dan worker, eksekusi di target) hanya bertemu di interface

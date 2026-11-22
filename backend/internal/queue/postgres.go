@@ -28,9 +28,7 @@ var (
 func NewPostgres(db gen.DBTX) *Postgres { return &Postgres{q: gen.New(db)} }
 
 func (p *Postgres) Publish(ctx context.Context, in PublishInput) (int64, error) {
-	carrier := propagation.MapCarrier{}
-	propagation.TraceContext{}.Inject(ctx, carrier)
-	traceContext, err := json.Marshal(carrier)
+	traceContext, err := encodeTrace(ctx)
 	if err != nil {
 		return 0, err
 	}
@@ -61,6 +59,20 @@ type Job struct {
 
 func (j Job) Context(ctx context.Context) context.Context {
 	return propagation.TraceContext{}.Extract(ctx, j.carrier)
+}
+
+// encodeTrace menyimpan span aktif sebagai W3C traceparent. Propagator dipanggil langsung, bukan lewat
+// global, supaya baggage dari client tidak ikut tersimpan di job.
+func encodeTrace(ctx context.Context) ([]byte, error) {
+	carrier := propagation.MapCarrier{}
+	propagation.TraceContext{}.Inject(ctx, carrier)
+	return json.Marshal(carrier)
+}
+
+func decodeTrace(raw []byte) (propagation.MapCarrier, error) {
+	carrier := propagation.MapCarrier{}
+	err := json.Unmarshal(raw, &carrier)
+	return carrier, err
 }
 
 func (p *Postgres) Claim(ctx context.Context) (*Job, error) {
@@ -99,8 +111,8 @@ func (p *Postgres) RequeueUnlocked(ctx context.Context, grace time.Duration) (in
 }
 
 func newJob(row gen.ListStaleJobsRow) (*Job, error) {
-	carrier := propagation.MapCarrier{}
-	if err := json.Unmarshal(row.TraceContext, &carrier); err != nil {
+	carrier, err := decodeTrace(row.TraceContext)
+	if err != nil {
 		return nil, fmt.Errorf("decode trace context of job %d: %w", row.ID, err)
 	}
 	return &Job{

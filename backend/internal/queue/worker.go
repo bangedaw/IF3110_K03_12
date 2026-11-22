@@ -282,12 +282,12 @@ func (w *Worker) jobSpan(ctx context.Context, job *Job, name string) (context.Co
 	ctx, span := tracer.Start(job.Context(ctx), name)
 	span.SetAttributes(
 		attribute.Int64("job.id", job.ID),
-		attribute.Int64("job.request_id", job.RequestID),
+		attribute.Int64("job.migration_request_id", job.RequestID),
 		attribute.Int64("job.database_id", job.DatabaseID),
 		attribute.Int("job.attempt", job.Attempt),
 	)
 	ctx = sqltrace.With(ctx,
-		slog.Int64("job_id", job.ID), slog.Int64("request_id", job.RequestID),
+		slog.Int64("job_id", job.ID), slog.Int64("migration_request_id", job.RequestID),
 		slog.Int64("database_id", job.DatabaseID), slog.Int64("actor", job.ActorID), slog.Int("attempt", job.Attempt))
 	return ctx, span
 }
