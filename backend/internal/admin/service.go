@@ -211,8 +211,8 @@ func (s *Service) ListGroups(ctx context.Context, p authz.Principal, limit, offs
 		return apigen.GroupPage{}, err
 	}
 	items := make([]apigen.Group, len(rows))
-	for i, g := range rows {
-		items[i] = toGroup(g)
+	for i, row := range rows {
+		items[i] = toGroup(row.Group, row.LeaderUsername)
 	}
 	return apigen.GroupPage{Items: items, Limit: int(limit), Offset: int(offset), Total: total}, nil
 }
@@ -225,19 +225,80 @@ func (s *Service) CreateGroup(ctx context.Context, p authz.Principal, in apigen.
 	if err := validateGroup(&in.Name, in.Description); err != nil {
 		return apigen.Group{}, err
 	}
-	g, err := s.q.CreateGroup(ctx, gen.CreateGroupParams{Name: in.Name, Description: deref(in.Description)})
+	// Group dibuat, leader dimasukkan sebagai anggota, lalu ditunjuk sebagai leader dalam satu transaction.
+	// Urutannya wajib begitu karena constraint groups_leader_is_member mensyaratkan leader sudah anggota.
+	var g gen.Group
+	var leader gen.User
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		var err error
+		leader, err = q.GetUserByID(ctx, in.LeaderId)
+		if errors.Is(err, pgx.ErrNoRows) || err == nil && !leader.IsActive {
+			return apperr.Validation(map[string]string{"leaderId": "harus user yang aktif"})
+		}
+		if err != nil {
+			return err
+		}
+		if g, err = q.CreateGroup(ctx, gen.CreateGroupParams{Name: in.Name, Description: deref(in.Description)}); err != nil {
+			return err
+		}
+		if err := q.AddGroupMember(ctx, gen.AddGroupMemberParams{GroupID: g.ID, UserID: leader.ID}); err != nil {
+			return err
+		}
+		g, err = q.SetGroupLeader(ctx, gen.SetGroupLeaderParams{ID: g.ID, UserID: pgtype.Int8{Int64: leader.ID, Valid: true}})
+		return err
+	})
 	if err != nil {
 		return apigen.Group{}, mapErr(err, "nama group sudah dipakai")
 	}
-	s.record(ctx, p, "admin.group.create", "group", g.ID, map[string]any{"name": g.Name})
-	return toGroup(g), nil
+	s.record(ctx, p, "admin.group.create", "group", g.ID, map[string]any{"name": g.Name, "leaderId": leader.ID})
+	return toGroup(g, pgtype.Text{String: leader.Username, Valid: true}), nil
+}
+
+// SetLeader menunjuk leader baru. Leader harus anggota group dan user yang aktif; leader lama tetap anggota.
+func (s *Service) SetLeader(ctx context.Context, p authz.Principal, groupID, userID int64) (apigen.Group, error) {
+	if err := s.authorize(ctx, p, authz.ActionManageGroups); err != nil {
+		return apigen.Group{}, err
+	}
+	var g gen.Group
+	var leader gen.User
+	var previous pgtype.Int8
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := s.q.WithTx(tx)
+		before, err := q.GetGroupByID(ctx, groupID)
+		if err != nil {
+			return err
+		}
+		previous = before.Group.LeaderUserID
+		if leader, err = q.GetUserByID(ctx, userID); err != nil {
+			return err
+		}
+		if !leader.IsActive {
+			return apperr.New(apperr.CodeConflict, "leader harus user yang aktif")
+		}
+		g, err = q.SetGroupLeader(ctx, gen.SetGroupLeaderParams{ID: groupID, UserID: pgtype.Int8{Int64: userID, Valid: true}})
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+		return apigen.Group{}, apperr.Wrap(apperr.CodeConflict, "leader harus anggota group ini", err)
+	}
+	if err != nil {
+		return apigen.Group{}, mapErr(err, "")
+	}
+	meta := map[string]any{"leaderId": userID}
+	if previous.Valid {
+		meta["previousLeaderId"] = previous.Int64
+	}
+	s.record(ctx, p, "admin.group.set_leader", "group", groupID, meta)
+	return toGroup(g, pgtype.Text{String: leader.Username, Valid: true}), nil
 }
 
 func (s *Service) GetGroup(ctx context.Context, p authz.Principal, id int64) (apigen.GroupDetail, error) {
 	if err := s.authorize(ctx, p, authz.ActionManageGroups); err != nil {
 		return apigen.GroupDetail{}, err
 	}
-	g, err := s.q.GetGroupByID(ctx, id)
+	row, err := s.q.GetGroupByID(ctx, id)
 	if err != nil {
 		return apigen.GroupDetail{}, mapErr(err, "")
 	}
@@ -245,7 +306,11 @@ func (s *Service) GetGroup(ctx context.Context, p authz.Principal, id int64) (ap
 	if err != nil {
 		return apigen.GroupDetail{}, err
 	}
-	return apigen.GroupDetail{Id: g.ID, Name: g.Name, Description: g.Description, CreatedAt: g.CreatedAt.Time.UTC(), Members: toUsers(members)}, nil
+	g := toGroup(row.Group, row.LeaderUsername)
+	return apigen.GroupDetail{
+		Id: g.Id, Name: g.Name, Description: g.Description, CreatedAt: g.CreatedAt,
+		LeaderId: g.LeaderId, LeaderUsername: g.LeaderUsername, Members: toUsers(members),
+	}, nil
 }
 
 func (s *Service) UpdateGroup(ctx context.Context, p authz.Principal, id int64, in apigen.GroupUpdate) (apigen.Group, error) {
@@ -267,7 +332,11 @@ func (s *Service) UpdateGroup(ctx context.Context, p authz.Principal, id int64, 
 		return apigen.Group{}, mapErr(err, "nama group sudah dipakai")
 	}
 	s.record(ctx, p, "admin.group.update", "group", id, map[string]any{"name": g.Name})
-	return toGroup(g), nil
+	row, err := s.q.GetGroupByID(ctx, id)
+	if err != nil {
+		return apigen.Group{}, mapErr(err, "")
+	}
+	return toGroup(row.Group, row.LeaderUsername), nil
 }
 
 func (s *Service) DeleteGroup(ctx context.Context, p authz.Principal, id int64) error {
@@ -450,8 +519,15 @@ func toUsers(rows []gen.User) []apigen.User {
 	return out
 }
 
-func toGroup(g gen.Group) apigen.Group {
-	return apigen.Group{Id: g.ID, Name: g.Name, Description: g.Description, CreatedAt: g.CreatedAt.Time.UTC()}
+func toGroup(g gen.Group, leaderUsername pgtype.Text) apigen.Group {
+	out := apigen.Group{Id: g.ID, Name: g.Name, Description: g.Description, CreatedAt: g.CreatedAt.Time.UTC()}
+	if g.LeaderUserID.Valid {
+		out.LeaderId = &g.LeaderUserID.Int64
+	}
+	if leaderUsername.Valid {
+		out.LeaderUsername = &leaderUsername.String
+	}
+	return out
 }
 
 func deref(s *string) string {

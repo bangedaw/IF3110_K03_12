@@ -25,13 +25,23 @@ UPDATE users SET password_hash = @password_hash, updated_at = now() WHERE id = @
 DELETE FROM users WHERE id = @id;
 
 -- name: ListGroups :many
-SELECT * FROM groups ORDER BY id LIMIT @lim OFFSET @off;
+SELECT sqlc.embed(g), u.username AS leader_username
+FROM groups g
+         LEFT JOIN users u ON u.id = g.leader_user_id
+ORDER BY g.id
+LIMIT @lim OFFSET @off;
 
 -- name: CountGroups :one
 SELECT count(*) FROM groups;
 
 -- name: GetGroupByID :one
-SELECT * FROM groups WHERE id = @id;
+SELECT sqlc.embed(g), u.username AS leader_username
+FROM groups g
+         LEFT JOIN users u ON u.id = g.leader_user_id
+WHERE g.id = @id;
+
+-- name: SetGroupLeader :one
+UPDATE groups SET leader_user_id = @user_id WHERE id = @id RETURNING *;
 
 -- name: CreateGroup :one
 INSERT INTO groups (name, description) VALUES (@name, @description) RETURNING *;

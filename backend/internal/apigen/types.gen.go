@@ -348,13 +348,20 @@ type Group struct {
 	CreatedAt   time.Time `json:"createdAt"`
 	Description string    `json:"description"`
 	Id          int64     `json:"id"`
-	Name        string    `json:"name"`
+
+	// LeaderId Kosong hanya untuk group dari Milestone 1 yang belum ditunjuk leader-nya.
+	LeaderId       *int64  `json:"leaderId"`
+	LeaderUsername *string `json:"leaderUsername"`
+	Name           string  `json:"name"`
 }
 
 // GroupCreate defines model for GroupCreate.
 type GroupCreate struct {
 	Description *string `json:"description,omitempty"`
-	Name        string  `json:"name"`
+
+	// LeaderId User aktif yang menjadi leader sekaligus anggota pertama group.
+	LeaderId int64  `json:"leaderId"`
+	Name     string `json:"name"`
 }
 
 // GroupDetail defines model for GroupDetail.
@@ -362,8 +369,17 @@ type GroupDetail struct {
 	CreatedAt   time.Time `json:"createdAt"`
 	Description string    `json:"description"`
 	Id          int64     `json:"id"`
-	Members     []User    `json:"members"`
-	Name        string    `json:"name"`
+
+	// LeaderId Kosong hanya untuk group dari Milestone 1 yang belum ditunjuk leader-nya.
+	LeaderId       *int64  `json:"leaderId"`
+	LeaderUsername *string `json:"leaderUsername"`
+	Members        []User  `json:"members"`
+	Name           string  `json:"name"`
+}
+
+// GroupLeaderSet defines model for GroupLeaderSet.
+type GroupLeaderSet struct {
+	UserId int64 `json:"userId"`
 }
 
 // GroupPage defines model for GroupPage.
@@ -622,6 +638,9 @@ type PatchApiAdminGroupsGroupIdJSONRequestBody = GroupUpdate
 
 // PutApiAdminGroupsGroupIdGrantsDatabaseIdJSONRequestBody defines body for PutApiAdminGroupsGroupIdGrantsDatabaseId for application/json ContentType.
 type PutApiAdminGroupsGroupIdGrantsDatabaseIdJSONRequestBody = GrantUpsert
+
+// PutApiAdminGroupsGroupIdLeaderJSONRequestBody defines body for PutApiAdminGroupsGroupIdLeader for application/json ContentType.
+type PutApiAdminGroupsGroupIdLeaderJSONRequestBody = GroupLeaderSet
 
 // PostApiAdminUsersJSONRequestBody defines body for PostApiAdminUsers for application/json ContentType.
 type PostApiAdminUsersJSONRequestBody = UserCreate

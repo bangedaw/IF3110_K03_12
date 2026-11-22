@@ -594,6 +594,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/admin/groups/{groupId}/leader": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupId: components["parameters"]["GroupId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Tunjuk leader group
+         * @description Leader harus anggota group dan user yang aktif. Leader lama tetap menjadi anggota. Leader menyetujui setiap migration pada database yang bisa diakses group-nya.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    groupId: components["parameters"]["GroupId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["GroupLeaderSet"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Group"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/admin/groups/{groupId}/grants": {
         parameters: {
             query?: never;
@@ -1541,6 +1592,12 @@ export interface components {
             description: string;
             /** Format: date-time */
             createdAt: string;
+            /**
+             * Format: int64
+             * @description Kosong hanya untuk group dari Milestone 1 yang belum ditunjuk leader-nya.
+             */
+            leaderId: number | null;
+            leaderUsername: string | null;
         };
         GroupDetail: components["schemas"]["Group"] & {
             members: components["schemas"]["User"][];
@@ -1548,6 +1605,15 @@ export interface components {
         GroupCreate: {
             name: string;
             description?: string;
+            /**
+             * Format: int64
+             * @description User aktif yang menjadi leader sekaligus anggota pertama group.
+             */
+            leaderId: number;
+        };
+        GroupLeaderSet: {
+            /** Format: int64 */
+            userId: number;
         };
         GroupUpdate: {
             name?: string;

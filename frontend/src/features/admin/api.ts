@@ -99,3 +99,9 @@ export function useSetGrant(groupId: number) {
     )
   })
 }
+
+export function useSetLeader(groupId: number) {
+  return useInvalidating(adminKeys.groups, (userId: number) =>
+    unwrap(client.PUT("/api/admin/groups/{groupId}/leader", { params: { path: { groupId } }, body: { userId } })),
+  )
+}

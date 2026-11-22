@@ -5,7 +5,7 @@ import { inputClass } from "@/components/ui/form"
 import { ErrorState, Loading } from "@/components/ErrorState"
 import { errorMessage } from "@/features/shared/client"
 import { useConnections } from "@/features/connections/api"
-import { useGrants, useGroup, useSetGrant, useSetMember, useUsers, type AccessLevel } from "./api"
+import { useGrants, useGroup, useSetGrant, useSetLeader, useSetMember, useUsers, type AccessLevel } from "./api"
 
 export function GroupDetailPage() {
   const groupId = Number(useParams().groupId)
@@ -15,6 +15,7 @@ export function GroupDetailPage() {
   const connections = useConnections()
   const setMember = useSetMember(groupId)
   const setGrant = useSetGrant(groupId)
+  const setLeader = useSetLeader(groupId)
   const [newMember, setNewMember] = useState("")
   const [actionError, setActionError] = useState("")
 
@@ -39,6 +40,16 @@ export function GroupDetailPage() {
         </Link>
         <h1 className="text-xl font-semibold">{group.data.name}</h1>
         {group.data.description && <p className="text-sm text-muted-foreground">{group.data.description}</p>}
+        {group.data.leaderUsername ? (
+          <p className="text-sm">
+            Leader: <span className="font-medium">{group.data.leaderUsername}</span>
+          </p>
+        ) : (
+          <p role="status" className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            Group ini belum punya leader. Migration pada database yang bisa diakses group ini tertahan di Pending Review sampai leader
+            ditunjuk dari daftar anggota di bawah.
+          </p>
+        )}
       </div>
 
       {actionError && (
@@ -74,16 +85,34 @@ export function GroupDetailPage() {
           <p className="text-sm text-muted-foreground">Belum ada anggota.</p>
         ) : (
           <ul className="divide-y rounded-xl border">
-            {group.data.members.map((m) => (
-              <li key={m.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                <span>
-                  <span className="font-medium">{m.username}</span> {m.displayName && <span className="text-muted-foreground">({m.displayName})</span>}
-                </span>
-                <Button size="sm" variant="outline" onClick={() => void run(() => setMember.mutateAsync({ userId: m.id, member: false }))}>
-                  Keluarkan
-                </Button>
-              </li>
-            ))}
+            {group.data.members.map((m) => {
+              const isLeader = m.id === group.data.leaderId
+              return (
+                <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                  <span>
+                    <span className="font-medium">{m.username}</span> {m.displayName && <span className="text-muted-foreground">({m.displayName})</span>}
+                    {isLeader && <span className="ml-2 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">Leader</span>}
+                    {!m.isActive && <span className="ml-2 text-xs text-muted-foreground">nonaktif</span>}
+                  </span>
+                  <span className="flex gap-2">
+                    {!isLeader && m.isActive && (
+                      <Button size="sm" variant="outline" disabled={setLeader.isPending} onClick={() => void run(() => setLeader.mutateAsync(m.id))}>
+                        Jadikan leader
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={isLeader}
+                      title={isLeader ? "Tunjuk leader lain sebelum mengeluarkan leader" : undefined}
+                      onClick={() => void run(() => setMember.mutateAsync({ userId: m.id, member: false }))}
+                    >
+                      Keluarkan
+                    </Button>
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>
