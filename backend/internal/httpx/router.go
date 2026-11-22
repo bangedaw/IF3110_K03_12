@@ -19,7 +19,7 @@ func NewRouter(logger *slog.Logger) chi.Router {
 	cop.SetDenyHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		Error(w, r, apperr.New(apperr.CodeCSRFInvalid, "request lintas origin ditolak"))
 	}))
-	r.Use(middleware.RequestID, Logger(logger), Recover(logger), cop.Handler)
+	r.Use(middleware.RequestID, Trace, Logger(logger), Recover(logger), cop.Handler)
 	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
 		Error(w, r, apperr.New(apperr.CodeNotFound, "endpoint tidak ditemukan"))
 	})
@@ -38,6 +38,7 @@ func Logger(logger *slog.Logger) func(http.Handler) http.Handler {
 			logger.InfoContext(r.Context(), "http",
 				"method", r.Method,
 				"path", r.URL.Path,
+				"route", RoutePattern(r),
 				"status", ww.Status(),
 				"bytes", ww.BytesWritten(),
 				"duration_ms", time.Since(start).Milliseconds(),
