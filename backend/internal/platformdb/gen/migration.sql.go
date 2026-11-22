@@ -489,6 +489,7 @@ FROM migration_runs r
          JOIN migrations m ON m.id = r.migration_id
          JOIN users u ON u.id = r.executed_by
 WHERE r.status = 'running'
+  AND r.job_id IS NULL
 ORDER BY r.id
 `
 

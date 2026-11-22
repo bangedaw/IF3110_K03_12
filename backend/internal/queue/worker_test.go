@@ -28,6 +28,8 @@ type memJobs struct {
 	completed map[int64]completion
 	deferred  map[int64]time.Duration
 	retried   map[int64]retryCall
+	stale     []*queue.Job
+	unlocked  int64
 }
 
 type retryCall struct {
@@ -78,6 +80,22 @@ func (m *memJobs) Retry(_ context.Context, jobID int64, delay time.Duration, las
 	return nil
 }
 
+func (m *memJobs) Stale(context.Context, time.Duration) ([]*queue.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	stale := m.stale
+	m.stale = nil
+	return stale, nil
+}
+
+func (m *memJobs) RequeueUnlocked(context.Context, time.Duration) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	n := m.unlocked
+	m.unlocked = 0
+	return n, nil
+}
+
 type memLocks struct {
 	mu       sync.Mutex
 	busy     bool
@@ -118,9 +136,12 @@ func (l *memLocks) isHeld(databaseID int64) bool {
 	return l.held[databaseID]
 }
 
-type targets struct{ m dbms.Migrator }
+type targets struct {
+	m   dbms.Migrator
+	err error
+}
 
-func (t targets) Migrator(context.Context, int64) (dbms.Migrator, error) { return t.m, nil }
+func (t targets) Migrator(context.Context, int64) (dbms.Migrator, error) { return t.m, t.err }
 
 type uncertainMigrator struct {
 	*dbms.FakeMigrator
@@ -153,7 +174,7 @@ func runAttempt(t *testing.T, attempt int, exec queue.Execution, m dbms.Migrator
 	t.Helper()
 	jobs := newMemJobs(&queue.Job{ID: 10, RequestID: 20, DatabaseID: 1, ActorID: 3, Attempt: attempt, MaxAttempts: 3})
 	lc := &queue.FakeLifecycle{Execution: exec}
-	w := &queue.Worker{Jobs: jobs, Locks: locks, Lifecycle: lc, Targets: targets{m}, LockTTL: 30 * time.Millisecond}
+	w := &queue.Worker{Jobs: jobs, Locks: locks, Lifecycle: lc, Targets: targets{m: m}, LockTTL: 30 * time.Millisecond}
 	found, err := w.Next(context.Background())
 	require.NoError(t, err)
 	require.True(t, found)
@@ -161,7 +182,7 @@ func runAttempt(t *testing.T, attempt int, exec queue.Execution, m dbms.Migrator
 }
 
 func TestNextReturnsFalseOnEmptyQueue(t *testing.T) {
-	w := &queue.Worker{Jobs: newMemJobs(), Locks: newMemLocks(), Lifecycle: &queue.FakeLifecycle{}, Targets: targets{&dbms.FakeMigrator{}}}
+	w := &queue.Worker{Jobs: newMemJobs(), Locks: newMemLocks(), Lifecycle: &queue.FakeLifecycle{}, Targets: targets{m: &dbms.FakeMigrator{}}}
 	found, err := w.Next(context.Background())
 	require.NoError(t, err)
 	assert.False(t, found)
@@ -185,7 +206,7 @@ func TestWorkerFailsJobWhenRevalidationRejects(t *testing.T) {
 	m := &dbms.FakeMigrator{}
 	jobs := newMemJobs(&queue.Job{ID: 10, RequestID: 20, Attempt: 1})
 	lc := &queue.FakeLifecycle{StartErr: apperr.New(apperr.CodeConflict, "approval tidak lengkap")}
-	w := &queue.Worker{Jobs: jobs, Locks: newMemLocks(), Lifecycle: lc, Targets: targets{m}}
+	w := &queue.Worker{Jobs: jobs, Locks: newMemLocks(), Lifecycle: lc, Targets: targets{m: m}}
 
 	_, err := w.Next(context.Background())
 	require.NoError(t, err)
@@ -281,11 +302,10 @@ func TestWorkerStopsExecutionWhenLeaseIsLost(t *testing.T) {
 	locks.renewErr = true
 	jobs, lc, _ := runWithLocks(t, queue.Execution{DatabaseID: 1, SQL: "SELECT pg_sleep(60)"}, blockingMigrator{&dbms.FakeMigrator{}}, locks)
 
-	require.Len(t, lc.Finished, 1)
-	assert.ErrorIs(t, lc.Finished[0].Err, context.Canceled)
-	assert.True(t, lc.Finished[0].WillRetry, "lease hilang termasuk kegagalan sementara")
-	assert.Contains(t, jobs.retried, int64(10))
-	assert.NotContains(t, jobs.completed, int64(10))
+	assert.Empty(t, lc.Finished, "worker yang kehilangan lease tidak menutup attempt")
+	assert.Empty(t, jobs.retried)
+	assert.NotContains(t, jobs.completed, int64(10), "job tetap running sampai dipulihkan")
+	assert.True(t, locks.isHeld(1), "lock tidak dilepas oleh worker yang sudah bukan pemiliknya")
 }
 
 func TestWorkerRenewsLeaseWhileRunning(t *testing.T) {
@@ -352,7 +372,7 @@ func TestWorkerDoesNotRetryPermanentFailure(t *testing.T) {
 func TestWorkerRetriesWhenRevalidationHitsTransientError(t *testing.T) {
 	jobs := newMemJobs(&queue.Job{ID: 10, RequestID: 20, DatabaseID: 1, Attempt: 1, MaxAttempts: 3})
 	lc := &queue.FakeLifecycle{StartErr: errors.New("platform db: connection reset")}
-	w := &queue.Worker{Jobs: jobs, Locks: newMemLocks(), Lifecycle: lc, Targets: targets{&dbms.FakeMigrator{}}}
+	w := &queue.Worker{Jobs: jobs, Locks: newMemLocks(), Lifecycle: lc, Targets: targets{m: &dbms.FakeMigrator{}}}
 
 	_, err := w.Next(context.Background())
 	require.NoError(t, err)
@@ -368,4 +388,107 @@ func TestWorkerRetriesPartialBatchAndKeepsProgress(t *testing.T) {
 	assert.True(t, lc.Finished[0].WillRetry)
 	assert.Equal(t, int64(4000), jobs.progress[10].RowsCommitted, "progres batch yang sudah commit tetap tersimpan")
 	assert.Contains(t, jobs.retried, int64(10))
+}
+
+func recoverOne(t *testing.T, attempt int, running *queue.Execution, tg targets, locks *memLocks) (*memJobs, *queue.FakeLifecycle) {
+	t.Helper()
+	jobs := newMemJobs()
+	jobs.stale = []*queue.Job{{ID: 10, RequestID: 20, DatabaseID: 1, ActorID: 3, Attempt: attempt, MaxAttempts: 3}}
+	lc := &queue.FakeLifecycle{Running: running}
+	w := &queue.Worker{Jobs: jobs, Locks: locks, Lifecycle: lc, Targets: tg, LockTTL: 30 * time.Millisecond}
+	n, err := w.Recover(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	return jobs, lc
+}
+
+func committedMigrator(t *testing.T, runID int64) *dbms.FakeMigrator {
+	t.Helper()
+	m := &dbms.FakeMigrator{}
+	_, err := m.Apply(context.Background(), dbms.ApplyInput{RunID: runID, Version: 4})
+	require.NoError(t, err)
+	return m
+}
+
+func TestRecoverCompletesAttemptThatCommittedBeforeWorkerDied(t *testing.T) {
+	locks := newMemLocks()
+	jobs, lc := recoverOne(t, 1, &queue.Execution{RunID: 5, DatabaseID: 1}, targets{m: committedMigrator(t, 5)}, locks)
+
+	require.Len(t, lc.Finished, 1)
+	assert.Equal(t, int64(5), lc.Finished[0].RunID)
+	assert.NoError(t, lc.Finished[0].Err, "riwayat target membuktikan migration ter-commit")
+	assert.Equal(t, queue.JobSucceeded, jobs.completed[10].status)
+	assert.False(t, locks.isHeld(1))
+}
+
+func TestRecoverRetriesAttemptWithoutEvidenceOfCommit(t *testing.T) {
+	jobs, lc := recoverOne(t, 1, &queue.Execution{RunID: 5, DatabaseID: 1}, targets{m: &dbms.FakeMigrator{}}, newMemLocks())
+
+	require.Len(t, lc.Finished, 1)
+	assert.ErrorContains(t, lc.Finished[0].Err, "worker berhenti")
+	assert.True(t, lc.Finished[0].WillRetry)
+	assert.Equal(t, 5*time.Second, jobs.retried[10].delay)
+	assert.NotContains(t, jobs.completed, int64(10))
+}
+
+func TestRecoverFailsLastAttemptWithoutEvidenceOfCommit(t *testing.T) {
+	jobs, lc := recoverOne(t, 3, &queue.Execution{RunID: 5, DatabaseID: 1}, targets{m: &dbms.FakeMigrator{}}, newMemLocks())
+
+	assert.False(t, lc.Finished[0].WillRetry)
+	assert.Empty(t, jobs.retried)
+	assert.Equal(t, queue.JobFailed, jobs.completed[10].status)
+}
+
+func TestRecoverReadsBatchProgressFromCheckpoint(t *testing.T) {
+	spec := batchSpec
+	m := &dbms.FakeMigrator{Progress: dbms.BatchProgress{BatchesCommitted: 4, RowsCommitted: 4000}}
+	jobs, lc := recoverOne(t, 3, &queue.Execution{RunID: 6, CheckpointRunID: 2, DatabaseID: 1, Direction: dbms.DirectionUp, Batch: &spec}, targets{m: m}, newMemLocks())
+
+	require.Len(t, lc.Finished, 1)
+	assert.Equal(t, 4, lc.Finished[0].Progress.BatchesCommitted)
+	assert.Equal(t, queue.JobPartial, jobs.completed[10].status, "batch yang sudah commit membuat hasilnya partial")
+}
+
+func TestRecoverCompletesFinishedBatch(t *testing.T) {
+	spec := batchSpec
+	m := &dbms.FakeMigrator{Progress: dbms.BatchProgress{BatchesCommitted: 5, Completed: true}}
+	jobs, lc := recoverOne(t, 1, &queue.Execution{RunID: 6, CheckpointRunID: 2, DatabaseID: 1, Direction: dbms.DirectionUp, Batch: &spec}, targets{m: m}, newMemLocks())
+
+	assert.NoError(t, lc.Finished[0].Err)
+	assert.Equal(t, queue.JobSucceeded, jobs.completed[10].status)
+}
+
+func TestRecoverRetriesAttemptThatNeverCreatedARun(t *testing.T) {
+	jobs, lc := recoverOne(t, 1, nil, targets{m: &dbms.FakeMigrator{}}, newMemLocks())
+
+	assert.Empty(t, lc.Finished, "tidak ada run yang perlu ditutup")
+	assert.Contains(t, jobs.retried, int64(10))
+}
+
+func TestRecoverLeavesJobRunningWhenTargetIsUnreachable(t *testing.T) {
+	locks := newMemLocks()
+	jobs, lc := recoverOne(t, 1, &queue.Execution{RunID: 5, DatabaseID: 1}, targets{err: errors.New("connection refused")}, locks)
+
+	assert.Empty(t, lc.Finished, "tanpa bukti, hasil attempt tidak ditebak")
+	assert.Empty(t, jobs.retried)
+	assert.NotContains(t, jobs.completed, int64(10))
+	assert.False(t, locks.isHeld(1), "lease dilepas agar putaran berikutnya mencoba lagi")
+}
+
+func TestRecoverSkipsJobAlreadyTakenByAnotherWorker(t *testing.T) {
+	locks := newMemLocks()
+	locks.busy = true
+	jobs, lc := recoverOne(t, 1, &queue.Execution{RunID: 5, DatabaseID: 1}, targets{m: committedMigrator(t, 5)}, locks)
+
+	assert.Empty(t, lc.Finished)
+	assert.NotContains(t, jobs.completed, int64(10))
+}
+
+func TestRecoverRequeuesJobsThatNeverHeldALock(t *testing.T) {
+	jobs := newMemJobs()
+	jobs.unlocked = 2
+	w := &queue.Worker{Jobs: jobs, Locks: newMemLocks(), Lifecycle: &queue.FakeLifecycle{}, Targets: targets{m: &dbms.FakeMigrator{}}}
+	n, err := w.Recover(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 2, n)
 }

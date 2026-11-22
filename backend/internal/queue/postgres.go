@@ -71,6 +71,34 @@ func (p *Postgres) Claim(ctx context.Context) (*Job, error) {
 	if err != nil {
 		return nil, fmt.Errorf("claim job: %w", err)
 	}
+	return newJob(gen.ListStaleJobsRow(row))
+}
+
+// Stale mengembalikan job running yang lease lock-nya sudah kedaluwarsa, artinya worker-nya mati atau
+// meninggalkan hasil commit yang belum pasti. grace mencegah job yang baru di-claim ikut terambil.
+func (p *Postgres) Stale(ctx context.Context, grace time.Duration) ([]*Job, error) {
+	rows, err := p.q.ListStaleJobs(ctx, grace.Seconds())
+	if err != nil {
+		return nil, fmt.Errorf("list stale jobs: %w", err)
+	}
+	jobs := make([]*Job, 0, len(rows))
+	for _, row := range rows {
+		job, err := newJob(row)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, nil
+}
+
+// RequeueUnlocked mengembalikan ke antrean job running yang tidak pernah memegang lock. Worker-nya mati
+// di antara claim dan acquire, jadi belum ada SQL yang dijalankan dan attempt-nya tidak dihitung.
+func (p *Postgres) RequeueUnlocked(ctx context.Context, grace time.Duration) (int64, error) {
+	return p.q.RequeueUnlockedJobs(ctx, grace.Seconds())
+}
+
+func newJob(row gen.ListStaleJobsRow) (*Job, error) {
 	carrier := propagation.MapCarrier{}
 	if err := json.Unmarshal(row.TraceContext, &carrier); err != nil {
 		return nil, fmt.Errorf("decode trace context of job %d: %w", row.ID, err)

@@ -15,6 +15,7 @@ const claimJob = `-- name: ClaimJob :one
 UPDATE jobs
 SET status     = 'running',
     attempts   = attempts + 1,
+    claimed_at = now(),
     started_at = COALESCE(started_at, now())
 WHERE id = (
     SELECT id FROM jobs
@@ -89,7 +90,7 @@ func (q *Queries) DeferJob(ctx context.Context, arg DeferJobParams) error {
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, request_id, database_id, status, attempts, max_attempts, run_after, trace_context, batches_committed, rows_committed, last_error, created_by, created_at, started_at, finished_at FROM jobs WHERE id = $1 AND database_id = $2
+SELECT id, request_id, database_id, status, attempts, max_attempts, run_after, trace_context, batches_committed, rows_committed, last_error, created_by, created_at, started_at, finished_at, claimed_at FROM jobs WHERE id = $1 AND database_id = $2
 `
 
 type GetJobParams struct {
@@ -116,8 +117,58 @@ func (q *Queries) GetJob(ctx context.Context, arg GetJobParams) (Job, error) {
 		&i.CreatedAt,
 		&i.StartedAt,
 		&i.FinishedAt,
+		&i.ClaimedAt,
 	)
 	return i, err
+}
+
+const listStaleJobs = `-- name: ListStaleJobs :many
+SELECT j.id, j.request_id, j.database_id, j.created_by, j.attempts, j.max_attempts, j.trace_context
+FROM jobs j
+         JOIN database_locks l ON l.job_id = j.id
+WHERE j.status = 'running'
+  AND l.expires_at < now()
+  AND COALESCE(j.claimed_at, j.created_at) < now() - make_interval(secs => $1::float8)
+ORDER BY j.id
+LIMIT 50
+`
+
+type ListStaleJobsRow struct {
+	ID           int64
+	RequestID    int64
+	DatabaseID   int64
+	CreatedBy    int64
+	Attempts     int32
+	MaxAttempts  int32
+	TraceContext []byte
+}
+
+func (q *Queries) ListStaleJobs(ctx context.Context, graceSeconds float64) ([]ListStaleJobsRow, error) {
+	rows, err := q.db.Query(ctx, listStaleJobs, graceSeconds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListStaleJobsRow
+	for rows.Next() {
+		var i ListStaleJobsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RequestID,
+			&i.DatabaseID,
+			&i.CreatedBy,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.TraceContext,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const requeueJob = `-- name: RequeueJob :exec
@@ -139,6 +190,24 @@ type RequeueJobParams struct {
 func (q *Queries) RequeueJob(ctx context.Context, arg RequeueJobParams) error {
 	_, err := q.db.Exec(ctx, requeueJob, arg.TraceContext, arg.ID)
 	return err
+}
+
+const requeueUnlockedJobs = `-- name: RequeueUnlockedJobs :execrows
+UPDATE jobs j
+SET status    = 'pending',
+    attempts  = attempts - 1,
+    run_after = now()
+WHERE j.status = 'running'
+  AND COALESCE(j.claimed_at, j.created_at) < now() - make_interval(secs => $1::float8)
+  AND NOT EXISTS (SELECT 1 FROM database_locks l WHERE l.job_id = j.id)
+`
+
+func (q *Queries) RequeueUnlockedJobs(ctx context.Context, graceSeconds float64) (int64, error) {
+	result, err := q.db.Exec(ctx, requeueUnlockedJobs, graceSeconds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const retryJob = `-- name: RetryJob :exec

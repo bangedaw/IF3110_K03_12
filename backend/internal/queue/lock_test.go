@@ -146,3 +146,66 @@ func TestRetryingJobKeepsItsAttemptsAndItsDatabase(t *testing.T) {
 	assert.False(t, acquire(t, q, databaseID, other, "w2"), "migration lain menunggu sampai retry selesai")
 	assert.True(t, acquire(t, q, databaseID, retrying, "w1"), "job yang di-retry mengambil kembali lock-nya")
 }
+
+func TestExpiredLeaseOfTheSameJobIsTakenOverByOneWorkerOnly(t *testing.T) {
+	pool := testutil.NewPlatformDB(t)
+	databaseID, userID := seedDatabase(t, pool)
+	q := queue.NewPostgres(pool)
+	job := publish(t, q, databaseID, userID, newRequest(t, pool, databaseID, userID))
+	exec(t, pool, `UPDATE jobs SET status = 'running'`)
+	require.True(t, acquire(t, q, databaseID, job, "w1"))
+
+	assert.False(t, acquire(t, q, databaseID, job, "w2"), "lease yang masih hidup tidak bisa diambil, walaupun untuk job yang sama")
+	exec(t, pool, `UPDATE database_locks SET expires_at = now() - interval '1 second'`)
+	assert.True(t, acquire(t, q, databaseID, job, "w2"), "pemulihan mengambil alih lease yang kedaluwarsa")
+	assert.False(t, acquire(t, q, databaseID, job, "w3"), "pemulihan kedua tidak ikut mengambil")
+	ok, err := q.Renew(context.Background(), databaseID, job, "w1", ttl)
+	require.NoError(t, err)
+	assert.False(t, ok, "worker lama berhenti karena lease-nya sudah diambil alih")
+}
+
+func TestStaleListsRunningJobsWhoseLeaseExpired(t *testing.T) {
+	pool := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	databaseID, userID := seedDatabase(t, pool)
+	q := queue.NewPostgres(pool)
+	id := publish(t, q, databaseID, userID, newRequest(t, pool, databaseID, userID))
+	_, err := q.Claim(ctx)
+	require.NoError(t, err)
+	require.True(t, acquire(t, q, databaseID, id, "w1"))
+
+	stale, err := q.Stale(ctx, 0)
+	require.NoError(t, err)
+	assert.Empty(t, stale, "lease masih hidup")
+
+	exec(t, pool, `UPDATE database_locks SET expires_at = now() - interval '1 second'`)
+	stale, err = q.Stale(ctx, time.Hour)
+	require.NoError(t, err)
+	assert.Empty(t, stale, "job yang baru di-claim belum dianggap tertinggal")
+	stale, err = q.Stale(ctx, 0)
+	require.NoError(t, err)
+	require.Len(t, stale, 1)
+	assert.Equal(t, id, stale[0].ID)
+	assert.Equal(t, 1, stale[0].Attempt)
+}
+
+func TestRequeueUnlockedReturnsJobsThatNeverHeldALock(t *testing.T) {
+	pool := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	databaseID, userID := seedDatabase(t, pool)
+	q := queue.NewPostgres(pool)
+	orphan := publish(t, q, databaseID, userID, newRequest(t, pool, databaseID, userID))
+	_, err := q.Claim(ctx)
+	require.NoError(t, err)
+
+	n, err := q.RequeueUnlocked(ctx, time.Hour)
+	require.NoError(t, err)
+	assert.Zero(t, n, "worker yang baru claim diberi waktu untuk mengambil lock")
+
+	n, err = q.RequeueUnlocked(ctx, 0)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), n)
+	row := readJob(t, pool, orphan)
+	assert.Equal(t, "pending", row.status)
+	assert.Equal(t, 0, row.attempts, "belum ada SQL yang jalan, attempt dikembalikan")
+}

@@ -387,6 +387,7 @@ type Job struct {
 	CreatedAt        pgtype.Timestamptz
 	StartedAt        pgtype.Timestamptz
 	FinishedAt       pgtype.Timestamptz
+	ClaimedAt        pgtype.Timestamptz
 }
 
 type Migration struct {

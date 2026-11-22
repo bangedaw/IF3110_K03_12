@@ -171,13 +171,21 @@ paket `queue` (pihak pemanggil) karena `migration` sudah mengimpor `queue` untuk
   ditandai gagal.
 - Jika hasil commit belum pasti (`dbms.ErrCommitUncertain`), worker memeriksa `CommittedVersion` lebih
   dulu dan baru memanggil `Finish` setelah hasilnya diketahui.
+- `Interrupted(jobID, attempt)` dipakai pemulihan (lihat bagian Pemulihan). Service migration
+  mengembalikan `Execution` milik attempt tersebut jika run-nya masih `running`, dengan isi yang sama
+  seperti hasil `Start`. Hasilnya `nil` jika attempt itu belum sempat membuat run atau run-nya sudah
+  ditutup. Setelah itu worker memanggil `Finish` untuk run tersebut seperti biasa.
 
 ### Lock per database
 
 Worker mengambil lock sebelum revalidasi dan eksekusi (`database_locks`, satu baris per database):
 
 - Lock berupa lease dengan TTL (default 30 detik) yang diperpanjang worker setiap sepertiga TTL selama job
-  berjalan, termasuk di antara commit batch. Jika perpanjangan gagal, eksekusi dibatalkan.
+  berjalan, termasuk di antara commit batch. Jika perpanjangan gagal atau tidak selesai dalam sepertiga
+  TTL, eksekusi dibatalkan dan worker berhenti tanpa menutup attempt. Hanya pemegang lease yang boleh
+  memanggil `Finish` dan mengubah status job.
+- Lease yang masih hidup hanya bisa diambil ulang oleh worker pemiliknya, termasuk untuk job yang sama.
+  Setelah kedaluwarsa, lease job tersebut bisa diambil alih satu worker lain untuk pemulihan.
 - Jika database sedang dipakai, job dikembalikan ke antrean dengan jeda (default 5 detik) tanpa
   menghabiskan jatah attempt.
 - Lease yang kedaluwarsa hanya boleh diambil alih jika job pemegangnya sudah tidak `running` atau
@@ -191,11 +199,39 @@ Worker mengambil lock sebelum revalidasi dan eksekusi (`database_locks`, satu ba
 
 - Hanya kegagalan sementara yang diulang: SQLSTATE yang dianggap sementara oleh
   `dbms.RetryableSQLState` (deadlock, serialization failure, lock timeout, koneksi, kehabisan resource),
-  database target tidak terjangkau, error koneksi yang aman diulang menurut pgx, dan lease lock yang
-  hilang. SQL yang salah atau constraint yang dilanggar langsung gagal.
+  database target tidak terjangkau, error koneksi yang aman diulang menurut pgx, dan attempt yang
+  terputus karena worker mati. SQL yang salah atau constraint yang dilanggar langsung gagal.
 - Revalidasi yang menolak (`*apperr.Error` dari `Lifecycle.Start`) tidak diulang. Error lain dari
   `Start`, misalnya platform DB terputus, diulang.
 - Jumlah attempt dibatasi `jobs.max_attempts` (default 3). Jeda antar attempt berlipat dua: 5 detik,
   10 detik, 20 detik, paling lama 5 menit.
 - Setiap attempt yang gagal tetap dilaporkan ke `Lifecycle.Finish` dengan `WillRetry: true`, sehingga
   tercatat di riwayat eksekusi. Mode batch melanjutkan dari checkpoint pada attempt berikutnya.
+
+### Pemulihan
+
+Setiap worker menjalankan `Worker.Recover` saat mulai dan setiap satu TTL lock. Ada dua keadaan yang
+dipulihkan:
+
+- Job `running` yang tidak pernah memegang lock: worker mati di antara claim dan pengambilan lock. Belum
+  ada SQL yang dijalankan, jadi job dikembalikan ke `pending` dan attempt-nya tidak dihitung.
+- Job `running` yang lease lock-nya kedaluwarsa: worker mati, kehilangan lease, atau meninggalkan hasil
+  commit yang belum pasti. Satu worker mengambil alih lease, meminta attempt yang terputus lewat
+  `Lifecycle.Interrupted`, lalu memeriksa bukti di database target:
+  - Mode biasa: `CommittedVersion(RunID)`. Migration berjalan dalam satu transaksi, jadi jika versinya ada
+    di riwayat target berarti seluruhnya ter-commit. Jika tidak ada, transaksinya dibatalkan PostgreSQL
+    saat koneksi worker putus.
+  - Mode batch: `BatchProgress(CheckpointRunID)`. `Completed` (atau `RevertCompleted` untuk rollback)
+    berarti selesai. Selain itu attempt dianggap terputus, dengan progres batch dari checkpoint.
+  - Attempt yang selesai ditutup sebagai berhasil. Attempt yang terputus mengikuti aturan retry: diulang
+    jika jatah attempt masih ada (mode batch melanjutkan dari checkpoint), selain itu `failed` atau
+    `partial`.
+  - Jika database target tidak terjangkau atau riwayatnya tidak terbaca, hasilnya tidak ditebak. Job tetap
+    `running`, lease dilepas, dan putaran pemulihan berikutnya mencoba lagi. Selama itu database tetap
+    tertahan.
+- Job yang baru di-claim kurang dari satu TTL tidak disentuh, supaya pemulihan tidak mengambil job yang
+  workernya masih hidup dan sedang mengambil lock.
+- Run dari antrean (`migration_runs.job_id` terisi) tidak lagi ditutup `migration.Reconciler` saat server
+  mulai, karena worker di proses lain mungkin masih menjalankannya.
+- Batasan: jika worker mati tepat di antara `Finish` dan pembaruan status job, attempt berikutnya akan
+  ditolak revalidasi karena request sudah selesai, dan job berakhir `failed` walaupun riwayat run benar.

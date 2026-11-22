@@ -35,6 +35,8 @@ type JobStore interface {
 	Complete(ctx context.Context, jobID int64, status JobStatus, lastError string) error
 	Defer(ctx context.Context, jobID int64, delay time.Duration) error
 	Retry(ctx context.Context, jobID int64, delay time.Duration, lastError string) error
+	Stale(ctx context.Context, grace time.Duration) ([]*Job, error)
+	RequeueUnlocked(ctx context.Context, grace time.Duration) (int64, error)
 }
 
 type Locks interface {
@@ -61,7 +63,10 @@ type Worker struct {
 	Concurrency    int
 }
 
-var errLeaseLost = errors.New("lease lock database hilang")
+var (
+	errLeaseLost   = errors.New("lease lock database hilang")
+	errInterrupted = errors.New("worker berhenti sebelum attempt selesai dan perubahannya tidak ditemukan di database target")
+)
 
 var defaultOwner = func() string {
 	host, _ := os.Hostname()
@@ -73,6 +78,11 @@ var tracer = otel.Tracer("github.com/bangedaw/IF3110_K03_12/backend/internal/que
 func (w *Worker) Run(ctx context.Context) {
 	n := max(w.Concurrency, 1)
 	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		w.recoverLoop(ctx)
+	}()
 	for range n {
 		wg.Add(1)
 		go func() {
@@ -114,9 +124,162 @@ func (w *Worker) Next(ctx context.Context) (bool, error) {
 }
 
 func (w *Worker) process(ctx context.Context, job *Job) {
-	start := time.Now()
-	ctx, span := tracer.Start(job.Context(ctx), "queue.job")
+	ctx, span := w.jobSpan(ctx, job, "queue.job")
 	defer span.End()
+	log := w.logger()
+	log.InfoContext(ctx, "job.start", "event", "job.start", "status", "running")
+
+	if !w.acquire(ctx, job) {
+		return
+	}
+	h := w.hold(ctx, job)
+
+	exec, err := w.Lifecycle.Start(h.execCtx, StartInput{RequestID: job.RequestID, JobID: job.ID, ActorID: job.ActorID, Attempt: job.Attempt})
+	if h.lost() {
+		return
+	}
+	if err != nil {
+		var rejected *apperr.Error
+		if !errors.As(err, &rejected) && job.Attempt < job.MaxAttempts {
+			h.retry(fmt.Errorf("revalidasi: %w", err))
+			return
+		}
+		h.end(JobFailed, fmt.Errorf("revalidasi: %w", err))
+		return
+	}
+	h.withRun(exec)
+
+	progress, runErr := w.execute(h.execCtx, job, exec)
+	if h.lost() {
+		return
+	}
+	if errors.Is(runErr, dbms.ErrCommitUncertain) {
+		// Lock tidak dilepas: lease kedaluwarsa tetapi job tetap running, sehingga migration lain di database
+		// ini tertahan sampai Recover memeriksa bukti commit.
+		h.stop()
+		span.SetStatus(codes.Error, runErr.Error())
+		log.ErrorContext(h.ctx, "job.uncertain", "event", "job.uncertain", "status", "uncertain", "error", runErr.Error())
+		return
+	}
+	h.settle(exec, progress, runErr)
+}
+
+// Recover memulihkan job yang tertinggal running: worker-nya mati, kehilangan lease, atau meninggalkan
+// hasil commit yang belum pasti. Hasil attempt ditentukan dari bukti di database target, bukan ditebak.
+func (w *Worker) Recover(ctx context.Context) (int, error) {
+	grace := w.lockTTL()
+	n, err := w.Jobs.RequeueUnlocked(ctx, grace)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		w.logger().WarnContext(ctx, "job.recover", "event", "job.recover", "status", "requeued", "jobs", n)
+	}
+	jobs, err := w.Jobs.Stale(ctx, grace)
+	if err != nil {
+		return int(n), err
+	}
+	for _, job := range jobs {
+		w.recover(context.WithoutCancel(ctx), job)
+	}
+	return int(n) + len(jobs), nil
+}
+
+func (w *Worker) recoverLoop(ctx context.Context) {
+	ticker := time.NewTicker(w.lockTTL())
+	defer ticker.Stop()
+	for {
+		if _, err := w.Recover(ctx); err != nil && ctx.Err() == nil {
+			w.logger().ErrorContext(ctx, "job.recover", "event", "job.recover", "status", "error", "error", err.Error())
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+func (w *Worker) recover(ctx context.Context, job *Job) {
+	ctx, span := w.jobSpan(ctx, job, "queue.recover")
+	defer span.End()
+	log := w.logger()
+
+	// Acquire berhasil hanya jika lease job ini sudah kedaluwarsa dan belum diambil worker lain, sehingga
+	// satu job dipulihkan oleh satu worker saja.
+	ok, err := w.Locks.Acquire(ctx, job.DatabaseID, job.ID, w.owner(), w.lockTTL())
+	if err != nil || !ok {
+		log.InfoContext(ctx, "job.recover", "event", "job.recover", "status", "skipped", "error", fmt.Sprint(err))
+		return
+	}
+	h := w.hold(ctx, job)
+	giveUp := func(err error) {
+		// Job tetap running dan lease dilepas, sehingga putaran pemulihan berikutnya mencoba lagi.
+		h.stop()
+		span.SetStatus(codes.Error, err.Error())
+		log.ErrorContext(h.ctx, "job.recover", "event", "job.recover", "status", "error", "error", err.Error())
+		h.release()
+	}
+
+	exec, err := w.Lifecycle.Interrupted(h.execCtx, job.ID, job.Attempt)
+	if err != nil {
+		giveUp(fmt.Errorf("baca attempt yang terputus: %w", err))
+		return
+	}
+	if exec == nil {
+		log.WarnContext(h.ctx, "job.recover", "event", "job.recover", "status", "no_run")
+		if job.Attempt < job.MaxAttempts {
+			h.retry(errInterrupted)
+		} else {
+			h.end(JobFailed, errInterrupted)
+		}
+		return
+	}
+	h.withRun(exec)
+
+	progress, done, err := w.evidence(h.execCtx, exec)
+	if err != nil {
+		giveUp(fmt.Errorf("periksa bukti commit: %w", err))
+		return
+	}
+	log.InfoContext(h.ctx, "job.recover", "event", "job.recover", "status", "checked", "committed", done)
+	var runErr error
+	if !done {
+		runErr = errInterrupted
+	}
+	h.settle(exec, progress, runErr)
+}
+
+// evidence membaca dari database target apakah attempt yang terputus sudah selesai. Mode biasa dilihat dari
+// riwayat versi (satu transaksi, jadi ter-commit seluruhnya atau tidak sama sekali), mode batch dari checkpoint.
+func (w *Worker) evidence(ctx context.Context, exec *Execution) (*dbms.BatchProgress, bool, error) {
+	m, err := w.Targets.Migrator(ctx, exec.DatabaseID)
+	if err != nil {
+		return nil, false, err
+	}
+	if exec.Batch == nil {
+		_, found, err := m.CommittedVersion(ctx, exec.RunID)
+		return nil, found, err
+	}
+	bm, ok := m.(dbms.BatchMigrator)
+	if !ok {
+		return nil, false, errors.New("database target tidak mendukung migration per batch")
+	}
+	p, err := bm.BatchProgress(ctx, exec.CheckpointRunID)
+	if errors.Is(err, dbms.ErrBatchRunUnknown) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if exec.Direction == dbms.DirectionDown {
+		return p, p.RevertCompleted, nil
+	}
+	return p, p.Completed, nil
+}
+
+func (w *Worker) jobSpan(ctx context.Context, job *Job, name string) (context.Context, trace.Span) {
+	ctx, span := tracer.Start(job.Context(ctx), name)
 	span.SetAttributes(
 		attribute.Int64("job.id", job.ID),
 		attribute.Int64("job.request_id", job.RequestID),
@@ -126,64 +289,75 @@ func (w *Worker) process(ctx context.Context, job *Job) {
 	ctx = sqltrace.With(ctx,
 		slog.Int64("job_id", job.ID), slog.Int64("request_id", job.RequestID),
 		slog.Int64("database_id", job.DatabaseID), slog.Int64("actor", job.ActorID), slog.Int("attempt", job.Attempt))
-	log := w.logger()
-	log.InfoContext(ctx, "job.start", "event", "job.start", "status", "running")
-
-	if !w.acquire(ctx, job) {
-		return
-	}
-	execCtx, stopHeartbeat := w.holdLock(ctx, job)
-	release := func() {
-		if err := w.Locks.Release(ctx, job.DatabaseID, job.ID, w.owner()); err != nil {
-			log.ErrorContext(ctx, "lock.release", "event", "lock.release", "status", "error", "error", err.Error())
-		}
-	}
-	end := func(status JobStatus, err error) {
-		stopHeartbeat()
-		w.complete(ctx, job, status, err, start)
-		release()
-	}
-	retry := func(err error) {
-		stopHeartbeat()
-		w.retry(ctx, job, err)
-		release()
-	}
-
-	exec, err := w.Lifecycle.Start(execCtx, StartInput{RequestID: job.RequestID, JobID: job.ID, ActorID: job.ActorID, Attempt: job.Attempt})
-	if err != nil {
-		var rejected *apperr.Error
-		if !errors.As(err, &rejected) && job.Attempt < job.MaxAttempts {
-			retry(fmt.Errorf("revalidasi: %w", err))
-			return
-		}
-		end(JobFailed, fmt.Errorf("revalidasi: %w", err))
-		return
-	}
-	execCtx = sqltrace.With(execCtx, slog.Int64("run_id", exec.RunID), slog.Int64("migration_id", exec.MigrationID))
-	ctx = sqltrace.With(ctx, slog.Int64("run_id", exec.RunID), slog.Int64("migration_id", exec.MigrationID))
-
-	progress, runErr := w.execute(execCtx, job, exec)
-	if errors.Is(runErr, dbms.ErrCommitUncertain) {
-		// Lock tidak dilepas: lease kedaluwarsa tetapi job tetap running, sehingga migration lain di database ini tertahan sampai pemulihan memeriksa bukti commit.
-		stopHeartbeat()
-		span.SetStatus(codes.Error, runErr.Error())
-		log.ErrorContext(ctx, "job.uncertain", "event", "job.uncertain", "status", "uncertain", "error", runErr.Error())
-		return
-	}
-	willRetry := runErr != nil && job.Attempt < job.MaxAttempts && retryable(execCtx, runErr)
-	if err := w.Lifecycle.Finish(ctx, FinishInput{RunID: exec.RunID, Err: runErr, Progress: progress, WillRetry: willRetry}); err != nil {
-		log.ErrorContext(ctx, "job.record", "event", "job.record", "status", "error", "error", err.Error())
-	}
-	if willRetry {
-		retry(runErr)
-		return
-	}
-	end(outcome(runErr, progress), runErr)
+	return ctx, span
 }
 
-// retryable memisahkan kegagalan sementara (koneksi, deadlock, lease hilang) dari kegagalan yang akan
+// held adalah job yang lock database-nya sedang dipegang worker ini. Hanya pemegang lease yang boleh
+// menutup attempt (Finish) dan mengubah status job.
+type held struct {
+	w       *Worker
+	job     *Job
+	ctx     context.Context
+	execCtx context.Context
+	stop    func()
+	start   time.Time
+}
+
+func (w *Worker) hold(ctx context.Context, job *Job) *held {
+	execCtx, stop := w.holdLock(ctx, job)
+	return &held{w: w, job: job, ctx: ctx, execCtx: execCtx, stop: stop, start: time.Now()}
+}
+
+func (h *held) withRun(exec *Execution) {
+	h.execCtx = sqltrace.With(h.execCtx, slog.Int64("run_id", exec.RunID), slog.Int64("migration_id", exec.MigrationID))
+	h.ctx = sqltrace.With(h.ctx, slog.Int64("run_id", exec.RunID), slog.Int64("migration_id", exec.MigrationID))
+}
+
+// lost melaporkan lease yang hilang di tengah jalan. Worker berhenti tanpa menutup attempt karena worker lain
+// mungkin sudah mengambil alih; Recover menutupnya setelah memeriksa bukti di database target.
+func (h *held) lost() bool {
+	if !errors.Is(context.Cause(h.execCtx), errLeaseLost) {
+		return false
+	}
+	h.stop()
+	trace.SpanFromContext(h.ctx).SetStatus(codes.Error, errLeaseLost.Error())
+	h.w.logger().ErrorContext(h.ctx, "job.abandon", "event", "job.abandon", "status", "lease_lost")
+	return true
+}
+
+func (h *held) settle(exec *Execution, progress *dbms.BatchProgress, runErr error) {
+	willRetry := runErr != nil && h.job.Attempt < h.job.MaxAttempts && retryable(runErr)
+	if err := h.w.Lifecycle.Finish(h.ctx, FinishInput{RunID: exec.RunID, Err: runErr, Progress: progress, WillRetry: willRetry}); err != nil {
+		h.w.logger().ErrorContext(h.ctx, "job.record", "event", "job.record", "status", "error", "error", err.Error())
+	}
+	if willRetry {
+		h.retry(runErr)
+		return
+	}
+	h.end(outcome(runErr, progress), runErr)
+}
+
+func (h *held) release() {
+	if err := h.w.Locks.Release(h.ctx, h.job.DatabaseID, h.job.ID, h.w.owner()); err != nil {
+		h.w.logger().ErrorContext(h.ctx, "lock.release", "event", "lock.release", "status", "error", "error", err.Error())
+	}
+}
+
+func (h *held) end(status JobStatus, err error) {
+	h.stop()
+	h.w.complete(h.ctx, h.job, status, err, h.start)
+	h.release()
+}
+
+func (h *held) retry(err error) {
+	h.stop()
+	h.w.retry(h.ctx, h.job, err)
+	h.release()
+}
+
+// retryable memisahkan kegagalan sementara (koneksi, deadlock, worker mati) dari kegagalan yang akan
 // berulang jika dijalankan lagi (SQL salah, constraint dilanggar).
-func retryable(execCtx context.Context, err error) bool {
+func retryable(err error) bool {
 	var se *dbms.StatementError
 	if errors.As(err, &se) {
 		return se.Retryable()
@@ -192,7 +366,7 @@ func retryable(execCtx context.Context, err error) bool {
 	if errors.As(err, &ae) {
 		return ae.Code == apperr.CodeDBUnreachable
 	}
-	return errors.Is(context.Cause(execCtx), errLeaseLost) || pgconn.SafeToRetry(err)
+	return errors.Is(err, errInterrupted) || pgconn.SafeToRetry(err)
 }
 
 func (w *Worker) retry(ctx context.Context, job *Job, err error) {
@@ -255,7 +429,11 @@ func (w *Worker) holdLock(ctx context.Context, job *Job) (context.Context, func(
 			case <-done:
 				return
 			case <-ticker.C:
-				ok, err := w.Locks.Renew(context.WithoutCancel(ctx), job.DatabaseID, job.ID, w.owner(), ttl)
+				// Batas waktu sepertiga TTL: perpanjangan yang menggantung tidak boleh membuat worker terus
+				// berjalan setelah lease-nya kedaluwarsa dan diambil alih Recover.
+				rctx, cancelRenew := context.WithTimeout(context.WithoutCancel(ctx), ttl/3)
+				ok, err := w.Locks.Renew(rctx, job.DatabaseID, job.ID, w.owner(), ttl)
+				cancelRenew()
 				if err != nil || !ok {
 					w.logger().ErrorContext(ctx, "lock.renew", "event", "lock.renew", "status", "lost", "error", fmt.Sprint(err))
 					cancel(errLeaseLost)

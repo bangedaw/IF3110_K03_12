@@ -41,6 +41,10 @@ type FakeLifecycle struct {
 	FinishErr error
 	Started   []StartInput
 	Finished  []FinishInput
+
+	// Running dikembalikan Interrupted; nil berarti attempt yang terputus belum membuat run.
+	Running      *Execution
+	InterruptErr error
 }
 
 var _ Lifecycle = (*FakeLifecycle)(nil)
@@ -67,4 +71,14 @@ func (f *FakeLifecycle) Finish(_ context.Context, in FinishInput) error {
 	defer f.mu.Unlock()
 	f.Finished = append(f.Finished, in)
 	return f.FinishErr
+}
+
+func (f *FakeLifecycle) Interrupted(context.Context, int64, int) (*Execution, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.InterruptErr != nil || f.Running == nil {
+		return nil, f.InterruptErr
+	}
+	e := *f.Running
+	return &e, nil
 }

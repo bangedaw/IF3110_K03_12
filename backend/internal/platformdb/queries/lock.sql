@@ -5,7 +5,8 @@ ON CONFLICT (database_id) DO UPDATE
 SET job_id     = EXCLUDED.job_id,
     owner      = EXCLUDED.owner,
     expires_at = EXCLUDED.expires_at
-WHERE database_locks.job_id = EXCLUDED.job_id
+WHERE (database_locks.job_id = EXCLUDED.job_id
+       AND (database_locks.owner = EXCLUDED.owner OR database_locks.expires_at < now()))
    OR (database_locks.expires_at < now() AND NOT EXISTS (
         SELECT 1
         FROM jobs holder

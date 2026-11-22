@@ -18,6 +18,7 @@ WHERE id = @id AND status IN ('failed', 'partial');
 UPDATE jobs
 SET status     = 'running',
     attempts   = attempts + 1,
+    claimed_at = now(),
     started_at = COALESCE(started_at, now())
 WHERE id = (
     SELECT id FROM jobs
@@ -57,3 +58,22 @@ SET status     = 'pending',
     run_after  = now() + make_interval(secs => @delay_seconds::float8),
     last_error = @last_error
 WHERE id = @id AND status = 'running';
+
+-- name: RequeueUnlockedJobs :execrows
+UPDATE jobs j
+SET status    = 'pending',
+    attempts  = attempts - 1,
+    run_after = now()
+WHERE j.status = 'running'
+  AND COALESCE(j.claimed_at, j.created_at) < now() - make_interval(secs => @grace_seconds::float8)
+  AND NOT EXISTS (SELECT 1 FROM database_locks l WHERE l.job_id = j.id);
+
+-- name: ListStaleJobs :many
+SELECT j.id, j.request_id, j.database_id, j.created_by, j.attempts, j.max_attempts, j.trace_context
+FROM jobs j
+         JOIN database_locks l ON l.job_id = j.id
+WHERE j.status = 'running'
+  AND l.expires_at < now()
+  AND COALESCE(j.claimed_at, j.created_at) < now() - make_interval(secs => @grace_seconds::float8)
+ORDER BY j.id
+LIMIT 50;
