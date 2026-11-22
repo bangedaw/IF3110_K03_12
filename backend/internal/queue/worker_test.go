@@ -27,10 +27,16 @@ type memJobs struct {
 	progress  map[int64]dbms.BatchProgress
 	completed map[int64]completion
 	deferred  map[int64]time.Duration
+	retried   map[int64]retryCall
+}
+
+type retryCall struct {
+	delay     time.Duration
+	lastError string
 }
 
 func newMemJobs(jobs ...*queue.Job) *memJobs {
-	return &memJobs{pending: jobs, progress: map[int64]dbms.BatchProgress{}, completed: map[int64]completion{}, deferred: map[int64]time.Duration{}}
+	return &memJobs{pending: jobs, progress: map[int64]dbms.BatchProgress{}, completed: map[int64]completion{}, deferred: map[int64]time.Duration{}, retried: map[int64]retryCall{}}
 }
 
 func (m *memJobs) Claim(context.Context) (*queue.Job, error) {
@@ -62,6 +68,13 @@ func (m *memJobs) Defer(_ context.Context, jobID int64, delay time.Duration) err
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deferred[jobID] = delay
+	return nil
+}
+
+func (m *memJobs) Retry(_ context.Context, jobID int64, delay time.Duration, lastError string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.retried[jobID] = retryCall{delay, lastError}
 	return nil
 }
 
@@ -133,7 +146,12 @@ func runOne(t *testing.T, exec queue.Execution, m dbms.Migrator) (*memJobs, *que
 
 func runWithLocks(t *testing.T, exec queue.Execution, m dbms.Migrator, locks *memLocks) (*memJobs, *queue.FakeLifecycle, *memLocks) {
 	t.Helper()
-	jobs := newMemJobs(&queue.Job{ID: 10, RequestID: 20, DatabaseID: 1, ActorID: 3, Attempt: 1, MaxAttempts: 3})
+	return runAttempt(t, 1, exec, m, locks)
+}
+
+func runAttempt(t *testing.T, attempt int, exec queue.Execution, m dbms.Migrator, locks *memLocks) (*memJobs, *queue.FakeLifecycle, *memLocks) {
+	t.Helper()
+	jobs := newMemJobs(&queue.Job{ID: 10, RequestID: 20, DatabaseID: 1, ActorID: 3, Attempt: attempt, MaxAttempts: 3})
 	lc := &queue.FakeLifecycle{Execution: exec}
 	w := &queue.Worker{Jobs: jobs, Locks: locks, Lifecycle: lc, Targets: targets{m}, LockTTL: 30 * time.Millisecond}
 	found, err := w.Next(context.Background())
@@ -265,7 +283,9 @@ func TestWorkerStopsExecutionWhenLeaseIsLost(t *testing.T) {
 
 	require.Len(t, lc.Finished, 1)
 	assert.ErrorIs(t, lc.Finished[0].Err, context.Canceled)
-	assert.Equal(t, queue.JobFailed, jobs.completed[10].status)
+	assert.True(t, lc.Finished[0].WillRetry, "lease hilang termasuk kegagalan sementara")
+	assert.Contains(t, jobs.retried, int64(10))
+	assert.NotContains(t, jobs.completed, int64(10))
 }
 
 func TestWorkerRenewsLeaseWhileRunning(t *testing.T) {
@@ -292,4 +312,60 @@ type slowMigrator struct {
 func (s slowMigrator) Apply(ctx context.Context, in dbms.ApplyInput) (*dbms.ApplyResult, error) {
 	time.Sleep(s.d)
 	return s.FakeMigrator.Apply(ctx, in)
+}
+
+func deadlock() error {
+	return &dbms.StatementError{Index: 1, SQLState: "40P01", Message: "deadlock detected"}
+}
+
+func TestWorkerRetriesTransientFailureWithBackoff(t *testing.T) {
+	m := &dbms.FakeMigrator{ApplyErr: deadlock()}
+	jobs, lc, locks := runAttempt(t, 2, queue.Execution{DatabaseID: 1, SQL: "UPDATE t SET x = 1"}, m, newMemLocks())
+
+	require.Len(t, lc.Finished, 1)
+	assert.True(t, lc.Finished[0].WillRetry, "attempt gagal tetap dicatat, dengan tanda akan diulang")
+	assert.Equal(t, 10*time.Second, jobs.retried[10].delay, "attempt ke-2 menunggu dua kali jeda dasar")
+	assert.Contains(t, jobs.retried[10].lastError, "deadlock detected")
+	assert.NotContains(t, jobs.completed, int64(10))
+	assert.False(t, locks.isHeld(1), "lock dilepas selama menunggu retry")
+}
+
+func TestWorkerStopsRetryingAfterMaxAttempts(t *testing.T) {
+	m := &dbms.FakeMigrator{ApplyErr: deadlock()}
+	jobs, lc, _ := runAttempt(t, 3, queue.Execution{DatabaseID: 1, SQL: "UPDATE t SET x = 1"}, m, newMemLocks())
+
+	require.Len(t, lc.Finished, 1)
+	assert.False(t, lc.Finished[0].WillRetry)
+	assert.Empty(t, jobs.retried)
+	assert.Equal(t, queue.JobFailed, jobs.completed[10].status)
+}
+
+func TestWorkerDoesNotRetryPermanentFailure(t *testing.T) {
+	m := &dbms.FakeMigrator{ApplyErr: &dbms.StatementError{Index: 1, SQLState: "42601", Message: "syntax error"}}
+	jobs, lc, _ := runWithLocks(t, queue.Execution{DatabaseID: 1, SQL: "UPDAT t"}, m, newMemLocks())
+
+	assert.False(t, lc.Finished[0].WillRetry)
+	assert.Empty(t, jobs.retried)
+	assert.Equal(t, queue.JobFailed, jobs.completed[10].status)
+}
+
+func TestWorkerRetriesWhenRevalidationHitsTransientError(t *testing.T) {
+	jobs := newMemJobs(&queue.Job{ID: 10, RequestID: 20, DatabaseID: 1, Attempt: 1, MaxAttempts: 3})
+	lc := &queue.FakeLifecycle{StartErr: errors.New("platform db: connection reset")}
+	w := &queue.Worker{Jobs: jobs, Locks: newMemLocks(), Lifecycle: lc, Targets: targets{&dbms.FakeMigrator{}}}
+
+	_, err := w.Next(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 5*time.Second, jobs.retried[10].delay)
+	assert.NotContains(t, jobs.completed, int64(10))
+}
+
+func TestWorkerRetriesPartialBatchAndKeepsProgress(t *testing.T) {
+	m := &dbms.FakeMigrator{Progress: dbms.BatchProgress{BatchesCommitted: 4, RowsCommitted: 4000}, BatchErr: deadlock()}
+	spec := batchSpec
+	jobs, lc, _ := runAttempt(t, 1, queue.Execution{DatabaseID: 1, SQL: "UPDATE t SET x = 1 WHERE id > $1 AND id <= $2", CheckpointRunID: 1, Batch: &spec}, m, newMemLocks())
+
+	assert.True(t, lc.Finished[0].WillRetry)
+	assert.Equal(t, int64(4000), jobs.progress[10].RowsCommitted, "progres batch yang sudah commit tetap tersimpan")
+	assert.Contains(t, jobs.retried, int64(10))
 }

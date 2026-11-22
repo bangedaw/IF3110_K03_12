@@ -24,7 +24,7 @@ WHERE database_locks.job_id = EXCLUDED.job_id
         JOIN jobs me ON me.id = EXCLUDED.job_id
         JOIN migration_requests me_req ON me_req.id = me.request_id
         WHERE holder.id = database_locks.job_id
-          AND (holder.status = 'running'
+          AND (holder.status IN ('pending', 'running')
                OR (holder.status = 'partial' AND holder_req.migration_id <> me_req.migration_id))))
 `
 

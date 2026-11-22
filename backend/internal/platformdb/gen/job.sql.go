@@ -141,6 +141,25 @@ func (q *Queries) RequeueJob(ctx context.Context, arg RequeueJobParams) error {
 	return err
 }
 
+const retryJob = `-- name: RetryJob :exec
+UPDATE jobs
+SET status     = 'pending',
+    run_after  = now() + make_interval(secs => $1::float8),
+    last_error = $2
+WHERE id = $3 AND status = 'running'
+`
+
+type RetryJobParams struct {
+	DelaySeconds float64
+	LastError    pgtype.Text
+	ID           int64
+}
+
+func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) error {
+	_, err := q.db.Exec(ctx, retryJob, arg.DelaySeconds, arg.LastError, arg.ID)
+	return err
+}
+
 const saveJobProgress = `-- name: SaveJobProgress :exec
 UPDATE jobs
 SET batches_committed = $1,

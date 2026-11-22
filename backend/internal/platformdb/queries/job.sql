@@ -50,3 +50,10 @@ SET status    = 'pending',
     attempts  = attempts - 1,
     run_after = now() + make_interval(secs => @delay_seconds::float8)
 WHERE id = @id AND status = 'running';
+
+-- name: RetryJob :exec
+UPDATE jobs
+SET status     = 'pending',
+    run_after  = now() + make_interval(secs => @delay_seconds::float8),
+    last_error = @last_error
+WHERE id = @id AND status = 'running';

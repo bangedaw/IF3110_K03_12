@@ -154,3 +154,11 @@ func (p *Postgres) Renew(ctx context.Context, databaseID, jobID int64, owner str
 func (p *Postgres) Release(ctx context.Context, databaseID, jobID int64, owner string) error {
 	return p.q.ReleaseDatabaseLock(ctx, gen.ReleaseDatabaseLockParams{DatabaseID: databaseID, JobID: jobID, Owner: owner})
 }
+
+func (p *Postgres) Retry(ctx context.Context, jobID int64, delay time.Duration, lastError string) error {
+	return p.q.RetryJob(ctx, gen.RetryJobParams{
+		ID:           jobID,
+		DelaySeconds: delay.Seconds(),
+		LastError:    pgtype.Text{String: lastError, Valid: lastError != ""},
+	})
+}

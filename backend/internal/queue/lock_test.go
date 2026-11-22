@@ -119,3 +119,30 @@ func TestDeferPutsJobBackWithoutSpendingAnAttempt(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, next, "job ditunda belum bisa diambil sebelum jedanya lewat")
 }
+
+func TestRetryingJobKeepsItsAttemptsAndItsDatabase(t *testing.T) {
+	pool := testutil.NewPlatformDB(t)
+	ctx := context.Background()
+	databaseID, userID := seedDatabase(t, pool)
+	q := queue.NewPostgres(pool)
+	retrying := publish(t, q, databaseID, userID, newRequest(t, pool, databaseID, userID))
+	other := publish(t, q, databaseID, userID, newRequest(t, pool, databaseID, userID))
+	job, err := q.Claim(ctx)
+	require.NoError(t, err)
+	require.Equal(t, retrying, job.ID)
+	require.True(t, acquire(t, q, databaseID, retrying, "w1"))
+
+	require.NoError(t, q.Retry(ctx, retrying, time.Hour, "deadlock detected"))
+	require.NoError(t, q.Release(ctx, databaseID, retrying, "w1"))
+
+	row := readJob(t, pool, retrying)
+	assert.Equal(t, "pending", row.status)
+	assert.Equal(t, 1, row.attempts, "attempt yang gagal tetap terhitung")
+	var lastError string
+	require.NoError(t, pool.QueryRow(ctx, `SELECT last_error FROM jobs WHERE id = $1`, retrying).Scan(&lastError))
+	assert.Equal(t, "deadlock detected", lastError)
+
+	exec(t, pool, `UPDATE jobs SET status = 'running' WHERE id = $1`, other)
+	assert.False(t, acquire(t, q, databaseID, other, "w2"), "migration lain menunggu sampai retry selesai")
+	assert.True(t, acquire(t, q, databaseID, retrying, "w1"), "job yang di-retry mengambil kembali lock-nya")
+}

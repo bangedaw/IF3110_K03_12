@@ -10,11 +10,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqltrace"
 )
@@ -32,6 +34,7 @@ type JobStore interface {
 	SaveProgress(ctx context.Context, jobID int64, progress dbms.BatchProgress) error
 	Complete(ctx context.Context, jobID int64, status JobStatus, lastError string) error
 	Defer(ctx context.Context, jobID int64, delay time.Duration) error
+	Retry(ctx context.Context, jobID int64, delay time.Duration, lastError string) error
 }
 
 type Locks interface {
@@ -54,8 +57,11 @@ type Worker struct {
 	PollInterval   time.Duration
 	LockTTL        time.Duration
 	LockRetryDelay time.Duration
+	RetryBaseDelay time.Duration
 	Concurrency    int
 }
+
+var errLeaseLost = errors.New("lease lock database hilang")
 
 var defaultOwner = func() string {
 	host, _ := os.Hostname()
@@ -127,16 +133,29 @@ func (w *Worker) process(ctx context.Context, job *Job) {
 		return
 	}
 	execCtx, stopHeartbeat := w.holdLock(ctx, job)
-	end := func(status JobStatus, err error) {
-		stopHeartbeat()
-		w.complete(ctx, job, status, err, start)
+	release := func() {
 		if err := w.Locks.Release(ctx, job.DatabaseID, job.ID, w.owner()); err != nil {
 			log.ErrorContext(ctx, "lock.release", "event", "lock.release", "status", "error", "error", err.Error())
 		}
 	}
+	end := func(status JobStatus, err error) {
+		stopHeartbeat()
+		w.complete(ctx, job, status, err, start)
+		release()
+	}
+	retry := func(err error) {
+		stopHeartbeat()
+		w.retry(ctx, job, err)
+		release()
+	}
 
 	exec, err := w.Lifecycle.Start(execCtx, StartInput{RequestID: job.RequestID, JobID: job.ID, ActorID: job.ActorID, Attempt: job.Attempt})
 	if err != nil {
+		var rejected *apperr.Error
+		if !errors.As(err, &rejected) && job.Attempt < job.MaxAttempts {
+			retry(fmt.Errorf("revalidasi: %w", err))
+			return
+		}
 		end(JobFailed, fmt.Errorf("revalidasi: %w", err))
 		return
 	}
@@ -151,10 +170,51 @@ func (w *Worker) process(ctx context.Context, job *Job) {
 		log.ErrorContext(ctx, "job.uncertain", "event", "job.uncertain", "status", "uncertain", "error", runErr.Error())
 		return
 	}
-	if err := w.Lifecycle.Finish(ctx, FinishInput{RunID: exec.RunID, Err: runErr, Progress: progress}); err != nil {
+	willRetry := runErr != nil && job.Attempt < job.MaxAttempts && retryable(execCtx, runErr)
+	if err := w.Lifecycle.Finish(ctx, FinishInput{RunID: exec.RunID, Err: runErr, Progress: progress, WillRetry: willRetry}); err != nil {
 		log.ErrorContext(ctx, "job.record", "event", "job.record", "status", "error", "error", err.Error())
 	}
+	if willRetry {
+		retry(runErr)
+		return
+	}
 	end(outcome(runErr, progress), runErr)
+}
+
+// retryable memisahkan kegagalan sementara (koneksi, deadlock, lease hilang) dari kegagalan yang akan
+// berulang jika dijalankan lagi (SQL salah, constraint dilanggar).
+func retryable(execCtx context.Context, err error) bool {
+	var se *dbms.StatementError
+	if errors.As(err, &se) {
+		return se.Retryable()
+	}
+	var ae *apperr.Error
+	if errors.As(err, &ae) {
+		return ae.Code == apperr.CodeDBUnreachable
+	}
+	return errors.Is(context.Cause(execCtx), errLeaseLost) || pgconn.SafeToRetry(err)
+}
+
+func (w *Worker) retry(ctx context.Context, job *Job, err error) {
+	delay := w.backoff(job.Attempt)
+	span := trace.SpanFromContext(ctx)
+	span.RecordError(err)
+	span.SetStatus(codes.Error, err.Error())
+	if rerr := w.Jobs.Retry(ctx, job.ID, delay, err.Error()); rerr != nil {
+		w.logger().ErrorContext(ctx, "job.retry", "event", "job.retry", "status", "error", "error", rerr.Error())
+		return
+	}
+	w.logger().WarnContext(ctx, "job.retry", "event", "job.retry", "status", "scheduled",
+		"next_attempt", job.Attempt+1, "delay_ms", delay.Milliseconds(), "error", err.Error())
+}
+
+// backoff menggandakan jeda setiap attempt: 5 detik, 10 detik, 20 detik, dan seterusnya, paling lama 5 menit.
+func (w *Worker) backoff(attempt int) time.Duration {
+	base := w.RetryBaseDelay
+	if base <= 0 {
+		base = 5 * time.Second
+	}
+	return min(base<<min(attempt-1, 16), 5*time.Minute)
 }
 
 func (w *Worker) acquire(ctx context.Context, job *Job) bool {
@@ -182,7 +242,7 @@ func (w *Worker) acquire(ctx context.Context, job *Job) bool {
 // holdLock memperpanjang lease selama job berjalan. Jika lease tidak bisa diperpanjang, eksekusi dibatalkan
 // supaya worker tidak lanjut mengubah database yang lock-nya mungkin sudah dipegang worker lain.
 func (w *Worker) holdLock(ctx context.Context, job *Job) (context.Context, func()) {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancelCause(ctx)
 	done := make(chan struct{})
 	stopped := make(chan struct{})
 	ttl := w.lockTTL()
@@ -198,7 +258,7 @@ func (w *Worker) holdLock(ctx context.Context, job *Job) (context.Context, func(
 				ok, err := w.Locks.Renew(context.WithoutCancel(ctx), job.DatabaseID, job.ID, w.owner(), ttl)
 				if err != nil || !ok {
 					w.logger().ErrorContext(ctx, "lock.renew", "event", "lock.renew", "status", "lost", "error", fmt.Sprint(err))
-					cancel()
+					cancel(errLeaseLost)
 					return
 				}
 			}
@@ -209,7 +269,7 @@ func (w *Worker) holdLock(ctx context.Context, job *Job) (context.Context, func(
 		once.Do(func() {
 			close(done)
 			<-stopped
-			cancel()
+			cancel(nil)
 		})
 	}
 }

@@ -180,8 +180,22 @@ Worker mengambil lock sebelum revalidasi dan eksekusi (`database_locks`, satu ba
   berjalan, termasuk di antara commit batch. Jika perpanjangan gagal, eksekusi dibatalkan.
 - Jika database sedang dipakai, job dikembalikan ke antrean dengan jeda (default 5 detik) tanpa
   menghabiskan jatah attempt.
-- Lease yang kedaluwarsa hanya boleh diambil alih jika job pemegangnya sudah tidak `running`. Job yang
-  masih `running` dengan lease kedaluwarsa berarti worker-nya mati atau hasil commit-nya belum pasti, dan
-  database itu tertahan sampai job tersebut dipulihkan.
+- Lease yang kedaluwarsa hanya boleh diambil alih jika job pemegangnya sudah tidak `running` atau
+  `pending`. Job yang masih `running` dengan lease kedaluwarsa berarti worker-nya mati atau hasil
+  commit-nya belum pasti, dan database itu tertahan sampai job tersebut dipulihkan. Job `pending` berarti
+  pemegang sedang menunggu retry, sehingga migration lain tidak menyela di antara attempt.
 - Job `partial` menahan migration lain di database yang sama. Hanya job untuk migration yang sama
   (melanjutkan atau membatalkan batch) yang boleh mengambil lock.
+
+### Retry
+
+- Hanya kegagalan sementara yang diulang: SQLSTATE yang dianggap sementara oleh
+  `dbms.RetryableSQLState` (deadlock, serialization failure, lock timeout, koneksi, kehabisan resource),
+  database target tidak terjangkau, error koneksi yang aman diulang menurut pgx, dan lease lock yang
+  hilang. SQL yang salah atau constraint yang dilanggar langsung gagal.
+- Revalidasi yang menolak (`*apperr.Error` dari `Lifecycle.Start`) tidak diulang. Error lain dari
+  `Start`, misalnya platform DB terputus, diulang.
+- Jumlah attempt dibatasi `jobs.max_attempts` (default 3). Jeda antar attempt berlipat dua: 5 detik,
+  10 detik, 20 detik, paling lama 5 menit.
+- Setiap attempt yang gagal tetap dilaporkan ke `Lifecycle.Finish` dengan `WillRetry: true`, sehingga
+  tercatat di riwayat eksekusi. Mode batch melanjutkan dari checkpoint pada attempt berikutnya.
