@@ -17,11 +17,13 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apigen"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/auth"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/config"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqltrace"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/telemetry"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/testutil"
 )
 
@@ -92,12 +94,23 @@ func connectionBody(name, host string, port int, database, username, password st
 		name, host, port, database, username, password)
 }
 
-func TestApplicationLogsNeverContainSecrets(t *testing.T) {
+// TestLogsAndSpansNeverContainSecrets memasang log dan tracing persis seperti main: handler log telemetry dan
+// exporter console OpenTelemetry. Keduanya diperiksa setelah alur yang menyentuh password, cookie session,
+// token CSRF, DSN, dan query string.
+func TestLogsAndSpansNeverContainSecrets(t *testing.T) {
 	logs := &syncBuffer{}
-	logger := slog.New(slog.NewJSONHandler(logs, nil))
+	logger := slog.New(telemetry.NewHandler(slog.NewJSONHandler(logs, nil)))
 	prev := slog.Default()
 	slog.SetDefault(logger)
-	t.Cleanup(func() { slog.SetDefault(prev) })
+	prevTP, prevProp := otel.GetTracerProvider(), otel.GetTextMapPropagator()
+	t.Cleanup(func() {
+		slog.SetDefault(prev)
+		otel.SetTracerProvider(prevTP)
+		otel.SetTextMapPropagator(prevProp)
+	})
+	spans := &syncBuffer{}
+	flushSpans, err := telemetry.Setup("dbmp-test", telemetry.ExporterConsole, spans)
+	require.NoError(t, err)
 
 	pool := tracedPlatformDB(t)
 	live := testutil.NewPostgresTarget(t).Config().ConnConfig
@@ -153,11 +166,16 @@ func TestApplicationLogsNeverContainSecrets(t *testing.T) {
 	require.Equal(t, http.StatusOK, alice.do(http.MethodGet, alive+"/schemas/app/tables/books/rows?q=LEAK-query", "").Code)
 	alice.do(http.MethodPost, dead+"/schema-diff", fmt.Sprintf(`{"against":{"type":"database","id":%d},"direction":"toTarget"}`, liveID))
 
+	require.NoError(t, flushSpans(context.Background()))
 	out := logs.String()
 	require.NotEmpty(t, out)
 	assert.Contains(t, out, "/api/databases")
 	assert.Contains(t, out, `"target":"platform"`)
 	assert.Contains(t, out, `"target":"target"`)
+	assert.Contains(t, out, `"trace_id"`, "log membawa trace_id")
+	traced := spans.String()
+	assert.Contains(t, traced, `"Name":"POST /api/auth/login"`, "span HTTP ikut diperiksa")
+	assert.Contains(t, traced, `"db.query.text"`, "span SQL ikut diperiksa")
 	secrets := []string{
 		"LEAK-login-pw", "LEAK-wrong-pw", "LEAK-cookie", "LEAK-query", "LEAK-admin-pw", "LEAK-alice-pw",
 		"LEAK-bad-csrf", "LEAK-csrf-body-pw", "LEAK-conn-pw", "LEAK-stored-pw", "LEAK-user-pw", "LEAK-reset-pw",
@@ -165,5 +183,6 @@ func TestApplicationLogsNeverContainSecrets(t *testing.T) {
 	}
 	for _, s := range secrets {
 		assert.NotContains(t, out, s, "log tidak boleh memuat %q", s)
+		assert.NotContains(t, traced, s, "span tidak boleh memuat %q", s)
 	}
 }

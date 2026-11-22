@@ -2,10 +2,13 @@ package httpx_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -14,6 +17,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -40,6 +44,10 @@ func tracedRouter(t *testing.T) (http.Handler, *tracetest.SpanRecorder, *bytes.B
 		api.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		api.Get("/databases/{databaseId}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		api.Get("/boom", func(http.ResponseWriter, *http.Request) { panic("boom") })
+		api.Post("/auth/login", func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.Copy(io.Discard, r.Body)
+			w.WriteHeader(http.StatusUnauthorized)
+		})
 	})
 	r.Get("/*", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return r, recorder, logs
@@ -116,4 +124,28 @@ func TestRequestLogCarriesTraceIDAndRoute(t *testing.T) {
 	assert.Equal(t, span.SpanContext().TraceID().String(), line["trace_id"])
 	assert.Equal(t, span.SpanContext().SpanID().String(), line["span_id"])
 	assert.Equal(t, "/api/databases/{databaseId}", line["route"])
+}
+
+func TestTraceAndRequestLogNeverRecordCredentials(t *testing.T) {
+	h, recorder, logs := tracedRouter(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login?next=LEAK-query",
+		strings.NewReader(`{"username":"alice","password":"LEAK-password"}`))
+	req.AddCookie(&http.Cookie{Name: "dbmp_session", Value: "LEAK-cookie"})
+	req.Header.Set("X-CSRF-Token", "LEAK-csrf")
+	req.Header.Set("Authorization", "Bearer LEAK-bearer")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+
+	// Span diekspor dengan exporter yang sama seperti di production, jadi yang diperiksa adalah teks yang
+	// benar-benar keluar: nama, atribut, event, dan status.
+	var exported bytes.Buffer
+	exp, err := stdouttrace.New(stdouttrace.WithWriter(&exported))
+	require.NoError(t, err)
+	require.NoError(t, exp.ExportSpans(context.Background(), recorder.Ended()))
+	require.Contains(t, exported.String(), "POST /api/auth/login")
+	require.Contains(t, logs.String(), "/api/auth/login")
+
+	for _, secret := range []string{"LEAK-query", "LEAK-password", "LEAK-cookie", "LEAK-csrf", "LEAK-bearer"} {
+		assert.NotContains(t, exported.String(), secret, "span tidak boleh memuat %q", secret)
+		assert.NotContains(t, logs.String(), secret, "log tidak boleh memuat %q", secret)
+	}
 }
