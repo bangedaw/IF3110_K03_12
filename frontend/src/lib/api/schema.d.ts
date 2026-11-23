@@ -221,6 +221,7 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        /** @description Ditolak (409) untuk akun sendiri atau jika user masih menjadi leader group. */
         delete: {
             parameters: {
                 query?: never;
@@ -242,11 +243,12 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
             };
         };
         options?: never;
         head?: never;
-        /** @description Menonaktifkan user (isActive=false) me-revoke semua session-nya. */
+        /** @description Menonaktifkan user (isActive=false) me-revoke semua session-nya. Ditolak (409) jika user masih menjadi leader group. */
         patch: {
             parameters: {
                 query?: never;
@@ -274,6 +276,7 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
                 422: components["responses"]["ValidationFailed"];
             };
         };
@@ -564,7 +567,10 @@ export interface paths {
             };
         };
         post?: never;
-        /** Keluarkan user dari group */
+        /**
+         * Keluarkan user dari group
+         * @description Leader tidak bisa dikeluarkan (409) sebelum leader lain ditunjuk.
+         */
         delete: {
             parameters: {
                 query?: never;
@@ -587,8 +593,60 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
             };
         };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/admin/groups/{groupId}/leader": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                groupId: components["parameters"]["GroupId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Tunjuk leader group
+         * @description Leader harus anggota group dan user yang aktif. Leader lama tetap menjadi anggota. Leader menyetujui setiap migration pada database yang bisa diakses group-nya.
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    groupId: components["parameters"]["GroupId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["GroupLeaderSet"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Group"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+            };
+        };
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -649,7 +707,10 @@ export interface paths {
             cookie?: never;
         };
         get?: never;
-        /** Set level akses group pada database (buat atau ubah) */
+        /**
+         * Set level akses group pada database (buat atau ubah)
+         * @description Menambah akses (grant baru atau naik ke edit) ditolak (409) untuk group yang belum punya leader, karena migration pada database itu tidak akan bisa disetujui. Menurunkan akses tetap boleh.
+         */
         put: {
             parameters: {
                 query?: never;
@@ -678,6 +739,7 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
                 422: components["responses"]["ValidationFailed"];
             };
         };
@@ -1541,6 +1603,12 @@ export interface components {
             description: string;
             /** Format: date-time */
             createdAt: string;
+            /**
+             * Format: int64
+             * @description Kosong hanya untuk group dari Milestone 1 yang belum ditunjuk leader-nya.
+             */
+            leaderId: number | null;
+            leaderUsername: string | null;
         };
         GroupDetail: components["schemas"]["Group"] & {
             members: components["schemas"]["User"][];
@@ -1548,6 +1616,15 @@ export interface components {
         GroupCreate: {
             name: string;
             description?: string;
+            /**
+             * Format: int64
+             * @description User aktif yang menjadi leader sekaligus anggota pertama group.
+             */
+            leaderId: number;
+        };
+        GroupLeaderSet: {
+            /** Format: int64 */
+            userId: number;
         };
         GroupUpdate: {
             name?: string;
@@ -1752,6 +1829,11 @@ export interface components {
             requestId: number;
             /** Format: int64 */
             databaseId: number;
+            /**
+             * @description Jenis request. Status partial pada rollback berarti sebagian batch sudah dibatalkan (partially reverted).
+             * @enum {string}
+             */
+            kind: "apply" | "rollback" | "forward";
             /** @enum {string} */
             status: "pending" | "running" | "succeeded" | "failed" | "partial";
             /** @description Jumlah attempt yang sudah dimulai */
@@ -1768,6 +1850,11 @@ export interface components {
             startedAt?: string;
             /** Format: date-time */
             finishedAt?: string;
+            /**
+             * Format: date-time
+             * @description Hanya ada saat status pending. Waktu paling cepat worker mengambil attempt berikutnya (jeda retry atau menunggu lock).
+             */
+            runAfter?: string;
         };
         SchemaDiffRequest: {
             against: {

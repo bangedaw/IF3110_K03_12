@@ -43,7 +43,10 @@ SET status      = @status,
 WHERE id = @id AND status = 'running';
 
 -- name: GetJob :one
-SELECT * FROM jobs WHERE id = @id AND database_id = @database_id;
+SELECT sqlc.embed(j), r.kind
+FROM jobs j
+         JOIN migration_requests r ON r.id = j.request_id
+WHERE j.id = @id AND j.database_id = @database_id;
 
 -- name: DeferJob :exec
 UPDATE jobs

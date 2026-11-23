@@ -151,7 +151,7 @@ func TestLogsAndSpansNeverContainSecrets(t *testing.T) {
 	userID := createdID(t, admin.do(http.MethodPost, "/api/admin/users", `{"username":"loguser","password":"LEAK-user-pw"}`))
 	admin.do(http.MethodPost, "/api/admin/users/"+strconv.FormatInt(userID, 10)+"/password", `{"password":"LEAK-reset-pw"}`)
 
-	groupID := createdID(t, admin.do(http.MethodPost, "/api/admin/groups", `{"name":"tim"}`))
+	groupID := createdID(t, admin.do(http.MethodPost, "/api/admin/groups", fmt.Sprintf(`{"name":"tim","leaderId":%d}`, aliceID)))
 	group := "/api/admin/groups/" + strconv.FormatInt(groupID, 10)
 	require.Equal(t, http.StatusNoContent, admin.do(http.MethodPut, group+"/members/"+strconv.FormatInt(aliceID, 10), "").Code)
 	for _, id := range []int64{deadID, liveID} {

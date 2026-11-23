@@ -145,18 +145,27 @@ func (q *Queries) DeleteUser(ctx context.Context, id int64) (int64, error) {
 }
 
 const getGroupByID = `-- name: GetGroupByID :one
-SELECT id, name, description, created_at, leader_user_id FROM groups WHERE id = $1
+SELECT g.id, g.name, g.description, g.created_at, g.leader_user_id, u.username AS leader_username
+FROM groups g
+         LEFT JOIN users u ON u.id = g.leader_user_id
+WHERE g.id = $1
 `
 
-func (q *Queries) GetGroupByID(ctx context.Context, id int64) (Group, error) {
+type GetGroupByIDRow struct {
+	Group          Group
+	LeaderUsername pgtype.Text
+}
+
+func (q *Queries) GetGroupByID(ctx context.Context, id int64) (GetGroupByIDRow, error) {
 	row := q.db.QueryRow(ctx, getGroupByID, id)
-	var i Group
+	var i GetGroupByIDRow
 	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Description,
-		&i.CreatedAt,
-		&i.LeaderUserID,
+		&i.Group.ID,
+		&i.Group.Name,
+		&i.Group.Description,
+		&i.Group.CreatedAt,
+		&i.Group.LeaderUserID,
+		&i.LeaderUsername,
 	)
 	return i, err
 }
@@ -249,7 +258,11 @@ func (q *Queries) ListGroupMembers(ctx context.Context, groupID int64) ([]User, 
 }
 
 const listGroups = `-- name: ListGroups :many
-SELECT id, name, description, created_at, leader_user_id FROM groups ORDER BY id LIMIT $2 OFFSET $1
+SELECT g.id, g.name, g.description, g.created_at, g.leader_user_id, u.username AS leader_username
+FROM groups g
+         LEFT JOIN users u ON u.id = g.leader_user_id
+ORDER BY g.id
+LIMIT $2 OFFSET $1
 `
 
 type ListGroupsParams struct {
@@ -257,25 +270,55 @@ type ListGroupsParams struct {
 	Lim int32
 }
 
-func (q *Queries) ListGroups(ctx context.Context, arg ListGroupsParams) ([]Group, error) {
+type ListGroupsRow struct {
+	Group          Group
+	LeaderUsername pgtype.Text
+}
+
+func (q *Queries) ListGroups(ctx context.Context, arg ListGroupsParams) ([]ListGroupsRow, error) {
 	rows, err := q.db.Query(ctx, listGroups, arg.Off, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Group
+	var items []ListGroupsRow
 	for rows.Next() {
-		var i Group
+		var i ListGroupsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Description,
-			&i.CreatedAt,
-			&i.LeaderUserID,
+			&i.Group.ID,
+			&i.Group.Name,
+			&i.Group.Description,
+			&i.Group.CreatedAt,
+			&i.Group.LeaderUserID,
+			&i.LeaderUsername,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listGroupsLedBy = `-- name: ListGroupsLedBy :many
+SELECT name FROM groups WHERE leader_user_id = $1 ORDER BY name
+`
+
+func (q *Queries) ListGroupsLedBy(ctx context.Context, userID pgtype.Int8) ([]string, error) {
+	rows, err := q.db.Query(ctx, listGroupsLedBy, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -321,6 +364,49 @@ func (q *Queries) ListUsers(ctx context.Context, arg ListUsersParams) ([]User, e
 	return items, nil
 }
 
+const lockUserForShare = `-- name: LockUserForShare :one
+SELECT id, username, display_name, password_hash, is_platform_admin, is_active, created_at, updated_at FROM users WHERE id = $1 FOR SHARE
+`
+
+func (q *Queries) LockUserForShare(ctx context.Context, id int64) (User, error) {
+	row := q.db.QueryRow(ctx, lockUserForShare, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.IsPlatformAdmin,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockUserForUpdate = `-- name: LockUserForUpdate :one
+
+SELECT id, username, display_name, password_hash, is_platform_admin, is_active, created_at, updated_at FROM users WHERE id = $1 FOR UPDATE
+`
+
+// Dua kunci berikut mencegah race antara menonaktifkan user dan menunjuknya sebagai leader: yang menonaktifkan
+// memegang FOR UPDATE, yang menunjuk memegang FOR SHARE, sehingga salah satunya selalu melihat hasil yang lain.
+func (q *Queries) LockUserForUpdate(ctx context.Context, id int64) (User, error) {
+	row := q.db.QueryRow(ctx, lockUserForUpdate, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.DisplayName,
+		&i.PasswordHash,
+		&i.IsPlatformAdmin,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const removeGroupMember = `-- name: RemoveGroupMember :execrows
 DELETE FROM group_members WHERE group_id = $1 AND user_id = $2
 `
@@ -357,6 +443,28 @@ UPDATE session_families SET rotate_required = TRUE WHERE user_id = $1 AND revoke
 func (q *Queries) RequireRotationForUser(ctx context.Context, userID int64) error {
 	_, err := q.db.Exec(ctx, requireRotationForUser, userID)
 	return err
+}
+
+const setGroupLeader = `-- name: SetGroupLeader :one
+UPDATE groups SET leader_user_id = $1 WHERE id = $2 RETURNING id, name, description, created_at, leader_user_id
+`
+
+type SetGroupLeaderParams struct {
+	UserID pgtype.Int8
+	ID     int64
+}
+
+func (q *Queries) SetGroupLeader(ctx context.Context, arg SetGroupLeaderParams) (Group, error) {
+	row := q.db.QueryRow(ctx, setGroupLeader, arg.UserID, arg.ID)
+	var i Group
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedAt,
+		&i.LeaderUserID,
+	)
+	return i, err
 }
 
 const updateGroup = `-- name: UpdateGroup :one

@@ -70,14 +70,19 @@ describe("app shell", () => {
         seen.get = request.headers.get("X-CSRF-Token")
         return HttpResponse.json({ items: [], limit: 200, offset: 0, total: 0 })
       }),
+      http.get("/api/admin/users", emptyUsers),
       http.post("/api/admin/groups", ({ request }) => {
         seen.post = request.headers.get("X-CSRF-Token")
-        return HttpResponse.json({ id: 9, name: "analyst", description: "", createdAt: admin.createdAt }, { status: 201 })
+        return HttpResponse.json(
+          { id: 9, name: "analyst", description: "", createdAt: admin.createdAt, leaderId: 2, leaderUsername: "alice" },
+          { status: 201 },
+        )
       }),
     )
     renderApp("/admin/groups")
 
     await user.type(await screen.findByLabelText("Nama group"), "analyst")
+    await user.selectOptions(screen.getByLabelText("Leader"), await screen.findByRole("option", { name: "alice" }))
     await user.click(screen.getByRole("button", { name: "Tambah group" }))
 
     await waitFor(() => expect(seen.post).toBe("csrf-abc"))

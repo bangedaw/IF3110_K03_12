@@ -143,17 +143,19 @@ func (p *Postgres) Complete(ctx context.Context, jobID int64, status JobStatus, 
 }
 
 func (p *Postgres) Get(ctx context.Context, databaseID, jobID int64) (apigen.Job, error) {
-	j, err := p.q.GetJob(ctx, gen.GetJobParams{ID: jobID, DatabaseID: databaseID})
+	row, err := p.q.GetJob(ctx, gen.GetJobParams{ID: jobID, DatabaseID: databaseID})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return apigen.Job{}, apperr.ErrNotFound
 	}
 	if err != nil {
 		return apigen.Job{}, err
 	}
+	j := row.Job
 	out := apigen.Job{
 		Id:               j.ID,
 		RequestId:        j.RequestID,
 		DatabaseId:       j.DatabaseID,
+		Kind:             apigen.JobKind(row.Kind),
 		Status:           apigen.JobStatus(j.Status),
 		Attempts:         int(j.Attempts),
 		MaxAttempts:      int(j.MaxAttempts),
@@ -162,6 +164,9 @@ func (p *Postgres) Get(ctx context.Context, databaseID, jobID int64) (apigen.Job
 		CreatedAt:        j.CreatedAt.Time.UTC(),
 		StartedAt:        utc(j.StartedAt),
 		FinishedAt:       utc(j.FinishedAt),
+	}
+	if j.Status == gen.JobStatusPending {
+		out.RunAfter = utc(j.RunAfter)
 	}
 	if j.LastError.Valid {
 		out.LastError = &j.LastError.String

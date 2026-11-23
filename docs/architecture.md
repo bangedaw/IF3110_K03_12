@@ -85,6 +85,12 @@ SPA (React + react-query)  →  handler (JSON)  →  service (logika + authz)  �
 - `frontend/src/features/<fitur>`: satu folder per fitur (halaman, hook react-query di `api.ts`, test).
   Yang disentuh bersama hanya daftar route di `app/router.tsx`.
 - `frontend/src/components`: komponen bersama (`ui/button`, `ui/form`, `ErrorState`).
+- `frontend/src/features/jobs`: `<JobStatus databaseId={…} jobId={…} />` menampilkan status job
+  eksekusi (dalam antrean, menunggu retry, berjalan, berhasil, gagal, partial, partially reverted), progres
+  batch dan row, jadwal attempt berikutnya, dan error terakhir. Komponen mem-polling `GET
+  /api/databases/{id}/jobs/{jobId}` setiap 2 detik selama job belum selesai, lalu berhenti sendiri.
+  Prop `onFinish` dipanggil sekali saat job yang sedang dipantau selesai, misalnya untuk memuat ulang
+  detail migration.
 - Menyembunyikan tombol di SPA hanya kenyamanan; service tetap memeriksa hak akses.
 - Responsif: navigasi, form, dan dialog tetap terjangkau di layar mobile; tabel lebar dan editor SQL
   di-scroll di dalam komponennya.
