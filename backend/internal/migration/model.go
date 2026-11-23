@@ -106,18 +106,18 @@ type Migration struct {
 // Execution adalah satu baris riwayat per attempt (R-4). Tidak pernah dihapus;
 // hanya boleh difinalisasi satu kali (running -> success/failed).
 type Execution struct {
-	ID                 int64
-	MigrationID        int64
-	Revision           int
-	UserID             int64
-	Kind               Kind
-	Status             Status // running/success/failed
-	ExecutedSQL        string // salinan SQL yang benar-benar dijalankan
-	RevertsExecutionID *int64 // diisi pada rollback: execution yang dibatalkan
-	ErrorMsg           string
-	SQLState           string
-	StartedAt          time.Time
-	FinishedAt         time.Time // zero selama masih running
+	ID                 int64     `json:"id"`
+	MigrationID        int64     `json:"migrationId"`
+	Revision           int       `json:"revision"`
+	UserID             int64     `json:"userId"`
+	Kind               Kind      `json:"kind"`
+	Status             Status    `json:"status"`             // running/success/failed
+	ExecutedSQL        string    `json:"executedSql"`        // salinan SQL yang benar-benar dijalankan
+	RevertsExecutionID *int64    `json:"revertsExecutionId"` // diisi pada rollback: execution yang dibatalkan
+	ErrorMsg           string    `json:"errorMessage"`
+	SQLState           string    `json:"sqlState"`
+	StartedAt          time.Time `json:"startedAt"`
+	FinishedAt         time.Time `json:"finishedAt"` // zero selama masih running
 }
 
 // ExecutionResult dilaporkan worker saat attempt selesai.
@@ -138,9 +138,9 @@ type ExecutionRequest struct {
 
 // Approver adalah leader group yang wajib menyetujui.
 type Approver struct {
-	GroupID  int64
-	LeaderID int64
-	Name     string // opsional, untuk UI
+	GroupID  int64  `json:"groupId"`
+	LeaderID int64  `json:"leaderId"`
+	Name     string `json:"name"` // opsional, untuk UI
 }
 
 type ApprovalDecision string
@@ -163,14 +163,14 @@ func (d ApprovalDecision) IsDecided() bool { return d == ApprovalApproved || d =
 
 // Approval: satu baris per (migration, revision, kind, leader).
 type Approval struct {
-	MigrationID int64
-	Revision    int
-	GroupID     int64
-	LeaderID    int64
-	Kind        Kind
-	Decision    ApprovalDecision
-	Comment     string
-	DecidedAt   *time.Time
+	MigrationID int64            `json:"migrationId"`
+	Revision    int              `json:"revision"`
+	GroupID     int64            `json:"groupId"`
+	LeaderID    int64            `json:"leaderId"`
+	Kind        Kind             `json:"kind"`
+	Decision    ApprovalDecision `json:"decision"`
+	Comment     string           `json:"comment"`
+	DecidedAt   *time.Time       `json:"decidedAt"`
 }
 
 // Actor adalah pengguna yang memanggil Service.
