@@ -58,6 +58,13 @@ const (
 	View  ExplorerTableSummaryKind = "view"
 )
 
+// Defines values for JobKind.
+const (
+	Apply    JobKind = "apply"
+	Forward  JobKind = "forward"
+	Rollback JobKind = "rollback"
+)
+
 // Defines values for JobStatus.
 const (
 	Failed    JobStatus = "failed"
@@ -407,13 +414,22 @@ type Job struct {
 	DatabaseId       int64      `json:"databaseId"`
 	FinishedAt       *time.Time `json:"finishedAt,omitempty"`
 	Id               int64      `json:"id"`
-	LastError        *string    `json:"lastError,omitempty"`
-	MaxAttempts      int        `json:"maxAttempts"`
-	RequestId        int64      `json:"requestId"`
-	RowsCommitted    int64      `json:"rowsCommitted"`
-	StartedAt        *time.Time `json:"startedAt,omitempty"`
-	Status           JobStatus  `json:"status"`
+
+	// Kind Jenis request. Status partial pada rollback berarti sebagian batch sudah dibatalkan (partially reverted).
+	Kind          JobKind `json:"kind"`
+	LastError     *string `json:"lastError,omitempty"`
+	MaxAttempts   int     `json:"maxAttempts"`
+	RequestId     int64   `json:"requestId"`
+	RowsCommitted int64   `json:"rowsCommitted"`
+
+	// RunAfter Hanya ada saat status pending. Waktu paling cepat worker mengambil attempt berikutnya (jeda retry atau menunggu lock).
+	RunAfter  *time.Time `json:"runAfter,omitempty"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+	Status    JobStatus  `json:"status"`
 }
+
+// JobKind Jenis request. Status partial pada rollback berarti sebagian batch sudah dibatalkan (partially reverted).
+type JobKind string
 
 // JobStatus defines model for Job.Status.
 type JobStatus string

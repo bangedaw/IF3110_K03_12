@@ -1074,11 +1074,15 @@ components:
 
     Job:
       type: object
-      required: [id, requestId, databaseId, status, attempts, maxAttempts, batchesCommitted, rowsCommitted, createdAt]
+      required: [id, requestId, databaseId, kind, status, attempts, maxAttempts, batchesCommitted, rowsCommitted, createdAt]
       properties:
         id: { type: integer, format: int64 }
         requestId: { type: integer, format: int64 }
         databaseId: { type: integer, format: int64 }
+        kind:
+          type: string
+          enum: [apply, rollback, forward]
+          description: Jenis request. Status partial pada rollback berarti sebagian batch sudah dibatalkan (partially reverted).
         status: { type: string, enum: [pending, running, succeeded, failed, partial] }
         attempts: { type: integer, description: Jumlah attempt yang sudah dimulai }
         maxAttempts: { type: integer }
@@ -1088,6 +1092,10 @@ components:
         createdAt: { type: string, format: date-time }
         startedAt: { type: string, format: date-time }
         finishedAt: { type: string, format: date-time }
+        runAfter:
+          type: string
+          format: date-time
+          description: Hanya ada saat status pending. Waktu paling cepat worker mengambil attempt berikutnya (jeda retry atau menunggu lock).
 
     SchemaDiffRequest:
       type: object

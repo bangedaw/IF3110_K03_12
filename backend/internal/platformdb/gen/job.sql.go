@@ -90,7 +90,10 @@ func (q *Queries) DeferJob(ctx context.Context, arg DeferJobParams) error {
 }
 
 const getJob = `-- name: GetJob :one
-SELECT id, request_id, database_id, status, attempts, max_attempts, run_after, trace_context, batches_committed, rows_committed, last_error, created_by, created_at, started_at, finished_at, claimed_at FROM jobs WHERE id = $1 AND database_id = $2
+SELECT j.id, j.request_id, j.database_id, j.status, j.attempts, j.max_attempts, j.run_after, j.trace_context, j.batches_committed, j.rows_committed, j.last_error, j.created_by, j.created_at, j.started_at, j.finished_at, j.claimed_at, r.kind
+FROM jobs j
+         JOIN migration_requests r ON r.id = j.request_id
+WHERE j.id = $1 AND j.database_id = $2
 `
 
 type GetJobParams struct {
@@ -98,26 +101,32 @@ type GetJobParams struct {
 	DatabaseID int64
 }
 
-func (q *Queries) GetJob(ctx context.Context, arg GetJobParams) (Job, error) {
+type GetJobRow struct {
+	Job  Job
+	Kind RequestKind
+}
+
+func (q *Queries) GetJob(ctx context.Context, arg GetJobParams) (GetJobRow, error) {
 	row := q.db.QueryRow(ctx, getJob, arg.ID, arg.DatabaseID)
-	var i Job
+	var i GetJobRow
 	err := row.Scan(
-		&i.ID,
-		&i.RequestID,
-		&i.DatabaseID,
-		&i.Status,
-		&i.Attempts,
-		&i.MaxAttempts,
-		&i.RunAfter,
-		&i.TraceContext,
-		&i.BatchesCommitted,
-		&i.RowsCommitted,
-		&i.LastError,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.StartedAt,
-		&i.FinishedAt,
-		&i.ClaimedAt,
+		&i.Job.ID,
+		&i.Job.RequestID,
+		&i.Job.DatabaseID,
+		&i.Job.Status,
+		&i.Job.Attempts,
+		&i.Job.MaxAttempts,
+		&i.Job.RunAfter,
+		&i.Job.TraceContext,
+		&i.Job.BatchesCommitted,
+		&i.Job.RowsCommitted,
+		&i.Job.LastError,
+		&i.Job.CreatedBy,
+		&i.Job.CreatedAt,
+		&i.Job.StartedAt,
+		&i.Job.FinishedAt,
+		&i.Job.ClaimedAt,
+		&i.Kind,
 	)
 	return i, err
 }

@@ -265,6 +265,14 @@ func TestGetReturnsJobOnlyForItsDatabase(t *testing.T) {
 	assert.Equal(t, 3, job.MaxAttempts)
 	assert.Nil(t, job.StartedAt)
 	assert.Nil(t, job.LastError)
+	assert.Equal(t, apigen.Apply, job.Kind)
+	require.NotNil(t, job.RunAfter, "job pending memberi tahu kapan diambil worker")
+
+	_, err = q.Claim(ctx)
+	require.NoError(t, err)
+	job, err = q.Get(ctx, databaseID, id)
+	require.NoError(t, err)
+	assert.Nil(t, job.RunAfter, "runAfter hanya bermakna saat pending")
 
 	_, err = q.Get(ctx, databaseID+1, id)
 	assert.ErrorIs(t, err, apperr.ErrNotFound)

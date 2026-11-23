@@ -34,7 +34,7 @@ const (
 )
 
 func jobRouter() http.Handler {
-	job := apigen.Job{Id: 7, RequestId: 3, DatabaseId: 1, Status: apigen.Partial, Attempts: 1, MaxAttempts: 3,
+	job := apigen.Job{Id: 7, RequestId: 3, DatabaseId: 1, Kind: apigen.Rollback, Status: apigen.Partial, Attempts: 1, MaxAttempts: 3,
 		BatchesCommitted: 2, RowsCommitted: 2000, CreatedAt: time.Date(2026, 11, 22, 1, 0, 0, 0, time.UTC)}
 	az := authz.NewFake().Grant(viewer, 1, authz.LevelView)
 
@@ -69,6 +69,7 @@ func TestGetJobReturnsStatusForViewer(t *testing.T) {
 	var body map[string]any
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 	assert.Equal(t, "partial", body["status"])
+	assert.Equal(t, "rollback", body["kind"], "SPA membedakan partial dan partially reverted dari kind")
 	assert.EqualValues(t, 2000, body["rowsCommitted"])
 	assert.EqualValues(t, 2, body["batchesCommitted"])
 }

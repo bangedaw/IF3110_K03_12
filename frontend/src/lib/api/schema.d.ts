@@ -1829,6 +1829,11 @@ export interface components {
             requestId: number;
             /** Format: int64 */
             databaseId: number;
+            /**
+             * @description Jenis request. Status partial pada rollback berarti sebagian batch sudah dibatalkan (partially reverted).
+             * @enum {string}
+             */
+            kind: "apply" | "rollback" | "forward";
             /** @enum {string} */
             status: "pending" | "running" | "succeeded" | "failed" | "partial";
             /** @description Jumlah attempt yang sudah dimulai */
@@ -1845,6 +1850,11 @@ export interface components {
             startedAt?: string;
             /** Format: date-time */
             finishedAt?: string;
+            /**
+             * Format: date-time
+             * @description Hanya ada saat status pending. Waktu paling cepat worker mengambil attempt berikutnya (jeda retry atau menunggu lock).
+             */
+            runAfter?: string;
         };
         SchemaDiffRequest: {
             against: {
