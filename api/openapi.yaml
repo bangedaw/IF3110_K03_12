@@ -520,8 +520,6 @@ paths:
       - $ref: '#/components/parameters/TableName'
       - $ref: '#/components/parameters/Limit'
       - $ref: '#/components/parameters/Offset'
-      - $ref: '#/components/parameters/OrderBy'
-      - $ref: '#/components/parameters/OrderDir'
     get:
       tags: [explorer]
       summary: Halaman baris data (read-only); nilai sel sudah diserialisasi aman
@@ -534,7 +532,6 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
         '503': { $ref: '#/components/responses/DBUnreachable' }
 
   /api/databases/{databaseId}/snapshots:
@@ -673,15 +670,6 @@ components:
       in: path
       required: true
       schema: { type: string, maxLength: 128 }
-    OrderBy:
-      name: orderBy
-      in: query
-      description: Harus salah satu nama kolom tabel (ditolak driver bila bukan)
-      schema: { type: string, maxLength: 128 }
-    OrderDir:
-      name: orderDir
-      in: query
-      schema: { type: string, enum: [asc, desc], default: asc }
     SnapshotId:
       name: snapshotId
       in: path

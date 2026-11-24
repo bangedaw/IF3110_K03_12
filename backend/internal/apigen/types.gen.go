@@ -121,12 +121,6 @@ const (
 	ToTarget SchemaDiffRequestDirection = "toTarget"
 )
 
-// Defines values for OrderDir.
-const (
-	Asc  OrderDir = "asc"
-	Desc OrderDir = "desc"
-)
-
 // AccessLevel defines model for AccessLevel.
 type AccessLevel string
 
@@ -573,12 +567,6 @@ type Limit = int
 // Offset defines model for Offset.
 type Offset = int
 
-// OrderBy defines model for OrderBy.
-type OrderBy = string
-
-// OrderDir defines model for OrderDir.
-type OrderDir string
-
 // SchemaName defines model for SchemaName.
 type SchemaName = string
 
@@ -631,10 +619,6 @@ type GetApiAdminUsersParams struct {
 type GetApiDatabasesDatabaseIdSchemasSchemaNameTablesTableNameRowsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
-
-	// OrderBy Harus salah satu nama kolom tabel (ditolak driver bila bukan)
-	OrderBy  *OrderBy  `form:"orderBy,omitempty" json:"orderBy,omitempty"`
-	OrderDir *OrderDir `form:"orderDir,omitempty" json:"orderDir,omitempty"`
 }
 
 // PostApiAdminDatabasesJSONRequestBody defines body for PostApiAdminDatabases for application/json ContentType.

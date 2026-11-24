@@ -156,28 +156,6 @@ describe("TableView", () => {
     expect(screen.getByRole("button", { name: "Berikutnya" })).toBeDisabled()
   })
 
-  it("data grid: klik header mengurutkan di server, menaik lalu menurun, dan kembali ke halaman pertama", async () => {
-    const user = userEvent.setup()
-    renderExplorer(`${url}?tab=data`)
-    await screen.findByText("WH-1")
-    await user.click(screen.getByRole("button", { name: "Berikutnya" }))
-    await screen.findByText("WH-51")
-
-    await user.click(screen.getByRole("button", { name: "code" }))
-    await waitFor(() => {
-      const last = new URL(requestedUrls.filter((u) => u.includes("/rows")).at(-1)!)
-      expect(last.searchParams.get("orderBy")).toBe("code")
-      expect(last.searchParams.get("orderDir")).toBe("asc")
-      expect(last.searchParams.get("offset")).toBe("0")
-    })
-
-    await user.click(screen.getByRole("button", { name: "code" }))
-    await waitFor(() => {
-      const last = new URL(requestedUrls.filter((u) => u.includes("/rows")).at(-1)!)
-      expect(last.searchParams.get("orderDir")).toBe("desc")
-    })
-  })
-
   it("data grid: mengubah ukuran halaman", async () => {
     const user = userEvent.setup()
     renderExplorer(`${url}?tab=data`)

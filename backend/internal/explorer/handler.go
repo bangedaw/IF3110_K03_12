@@ -147,12 +147,10 @@ func (s *Service) handleRows(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(query.Get("limit"))
 	offset, _ := strconv.Atoi(query.Get("offset"))
 	q := dbms.RowsQuery{
-		Schema:   chi.URLParam(r, "schemaName"),
-		Table:    chi.URLParam(r, "tableName"),
-		Limit:    limit,
-		Offset:   offset,
-		OrderBy:  query.Get("orderBy"),
-		OrderDir: query.Get("orderDir"),
+		Schema: chi.URLParam(r, "schemaName"),
+		Table:  chi.URLParam(r, "tableName"),
+		Limit:  limit,
+		Offset: offset,
 	}
 	page, err := s.Rows(r.Context(), p, id, q)
 	if err != nil {
