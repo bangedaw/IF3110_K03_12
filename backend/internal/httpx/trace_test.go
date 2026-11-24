@@ -84,7 +84,7 @@ func TestTraceNamesSpanAfterRoutePattern(t *testing.T) {
 	assert.EqualValues(t, 200, a["http.response.status_code"].AsInt64())
 	assert.NotEmpty(t, a["dbmp.request_id"].AsString())
 	for _, v := range a {
-		assert.NotContains(t, v.Emit(), "rahasia", "query string tidak masuk span")
+		assert.NotContains(t, v.String(), "rahasia", "query string tidak masuk span")
 	}
 }
 
