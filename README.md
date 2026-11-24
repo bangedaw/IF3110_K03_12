@@ -125,8 +125,7 @@ Mode batch dijalankan oleh `dbms.BatchMigrator` (implementasi PostgreSQL di
   nomor batch, rentang cursor, jumlah row) ditulis di database target dalam transaction yang sama dengan
   perubahan batch, sehingga checkpoint selalu sesuai dengan data yang benar-benar committed.
 - Melanjutkan eksekusi yang gagal memakai execution ID yang sama dan mulai dari checkpoint terakhir.
-  Ukuran batch boleh diubah saat melanjutkan. Batch yang sudah committed tidak diulang, termasuk saat
-  pesan job terkirim dua kali.
+  Batch yang sudah committed tidak diulang, termasuk saat pesan job terkirim dua kali.
 - Pembatalan menjalankan SQL down per batch dari nomor batch terbesar ke terkecil memakai rentang yang
   tersimpan. Bila gagal di tengah, statusnya `partially_reverted` dan pembatalan dapat dilanjutkan.
   Eksekusi yang sudah dibatalkan, sebagian atau seluruhnya, tidak dapat dilanjutkan ke depan; forward
