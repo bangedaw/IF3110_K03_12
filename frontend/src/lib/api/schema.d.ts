@@ -1247,9 +1247,6 @@ export interface paths {
             query?: {
                 limit?: components["parameters"]["Limit"];
                 offset?: components["parameters"]["Offset"];
-                /** @description Harus salah satu nama kolom tabel (ditolak driver bila bukan) */
-                orderBy?: components["parameters"]["OrderBy"];
-                orderDir?: components["parameters"]["OrderDir"];
             };
             header?: never;
             path: {
@@ -1265,9 +1262,6 @@ export interface paths {
                 query?: {
                     limit?: components["parameters"]["Limit"];
                     offset?: components["parameters"]["Offset"];
-                    /** @description Harus salah satu nama kolom tabel (ditolak driver bila bukan) */
-                    orderBy?: components["parameters"]["OrderBy"];
-                    orderDir?: components["parameters"]["OrderDir"];
                 };
                 header?: never;
                 path: {
@@ -1291,7 +1285,6 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
-                422: components["responses"]["ValidationFailed"];
                 503: components["responses"]["DBUnreachable"];
             };
         };
@@ -1954,9 +1947,6 @@ export interface components {
         DatabaseId: number;
         SchemaName: string;
         TableName: string;
-        /** @description Harus salah satu nama kolom tabel (ditolak driver bila bukan) */
-        OrderBy: string;
-        OrderDir: "asc" | "desc";
         SnapshotId: number;
         JobId: number;
     };

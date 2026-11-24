@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react"
-import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type SortingState } from "@tanstack/react-table"
-import { ArrowDown, ArrowUp } from "lucide-react"
+import { flexRender, getCoreRowModel, useReactTable, type ColumnDef } from "@tanstack/react-table"
 import { Button } from "@/components/ui/button"
 import { ErrorState, Loading } from "@/components/ErrorState"
 import type { Cell } from "@/features/shared/types"
@@ -12,14 +11,10 @@ const PAGE_SIZES = [25, 50, 100, 200]
 export function DataGrid({ databaseId, schema, table }: { databaseId: number; schema: string; table: string }) {
   const [pageSize, setPageSize] = useState(50)
   const [pageIndex, setPageIndex] = useState(0)
-  const [sorting, setSorting] = useState<SortingState>([])
 
-  const sort = sorting[0]
   const query = useRows(databaseId, schema, table, {
     limit: pageSize,
     offset: pageIndex * pageSize,
-    orderBy: sort?.id,
-    orderDir: sort?.desc ? "desc" : "asc",
   })
 
   const page = query.data
@@ -46,15 +41,7 @@ export function DataGrid({ databaseId, schema, table }: { databaseId: number; sc
   const grid = useReactTable({
     data: page?.rows ?? [],
     columns,
-    state: { sorting },
-    manualSorting: true,
     manualPagination: true,
-    enableSortingRemoval: true,
-    sortDescFirst: false,
-    onSortingChange: (updater) => {
-      setSorting((current) => (typeof updater === "function" ? updater(current).slice(-1) : updater.slice(-1)))
-      setPageIndex(0)
-    },
     getCoreRowModel: getCoreRowModel(),
   })
 
@@ -74,27 +61,11 @@ export function DataGrid({ databaseId, schema, table }: { databaseId: number; sc
           <thead className="bg-muted/50 text-left">
             {grid.getHeaderGroups().map((group) => (
               <tr key={group.id}>
-                {group.headers.map((header) => {
-                  const direction = header.column.getIsSorted()
-                  return (
-                    <th
-                      key={header.id}
-                      scope="col"
-                      aria-sort={direction === "asc" ? "ascending" : direction === "desc" ? "descending" : "none"}
-                      className="whitespace-nowrap px-3 py-2 font-medium"
-                    >
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 hover:underline"
-                        onClick={header.column.getToggleSortingHandler()}
-                      >
-                        {flexRender(header.column.columnDef.header, header.getContext())}
-                        {direction === "asc" && <ArrowUp className="size-3" />}
-                        {direction === "desc" && <ArrowDown className="size-3" />}
-                      </button>
-                    </th>
-                  )
-                })}
+                {group.headers.map((header) => (
+                  <th key={header.id} scope="col" className="whitespace-nowrap px-3 py-2 font-medium">
+                    {flexRender(header.column.columnDef.header, header.getContext())}
+                  </th>
+                ))}
               </tr>
             ))}
           </thead>
