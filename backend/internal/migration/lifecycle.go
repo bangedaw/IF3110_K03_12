@@ -3,192 +3,279 @@ package migration
 import (
 	"context"
 	"errors"
-	"fmt"
-	"time"
+	"log/slog"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/queue"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqltrace"
 )
 
-// lifecycle adalah implementasi ExecutionLifecycle (contracts.go) di atas Store.
-type lifecycle struct {
-	store Store
-	now   func() time.Time
+type Lifecycle struct {
+	Pool  *pgxpool.Pool
+	Auth  authz.Authorizer
+	Audit *audit.Logger
 }
 
-// NewLifecycle membuat ExecutionLifecycle untuk dipakai worker.
-func NewLifecycle(s Store) ExecutionLifecycle {
-	return &lifecycle{store: s, now: time.Now}
-}
+var _ queue.Lifecycle = Lifecycle{}
 
-// Revalidate mengulang pemeriksaan terhadap keadaan TERKINI saat worker
-// mengambil job:
-//  1. status migration sesuai jenis eksekusi,
-//  2. CheckApply/CheckRollback/CheckForward masih lolos,
-//  3. approval revisi saat ini masih lengkap.
-func (l *lifecycle) Revalidate(ctx context.Context, req ExecutionRequest) error {
-	m, err := l.load(ctx, req)
-	if err != nil {
-		return err
-	}
-
-	switch req.Kind {
-	case KindApply:
-		if m.Status != StatusApproved && m.Status != StatusPendingQueue {
-			return fmt.Errorf("%w: apply butuh status approved/pending_queue, didapat %s", ErrInvalidTransition, m.Status)
-		}
-	case KindRollback, KindForward:
-		if m.Status != StatusSuccess {
-			return fmt.Errorf("%w: %s butuh status success, didapat %s", ErrInvalidTransition, req.Kind, m.Status)
-		}
-		if !m.SQLLocked {
-			return fmt.Errorf("%w: migration %d belum pernah dieksekusi", ErrInvalidTransition, m.ID)
-		}
-	}
-
-	all, err := l.store.ListMigrations(ctx, m.DatabaseID)
-	if err != nil {
-		return fmt.Errorf("lifecycle: list migrations: %w", err)
-	}
-	history, err := l.store.ListExecutions(ctx, m.DatabaseID, HistoryFilter{})
-	if err != nil {
-		return fmt.Errorf("lifecycle: history: %w", err)
-	}
-	switch req.Kind {
-	case KindApply:
-		err = CheckApply(*m, history, all)
-	case KindRollback:
-		err = CheckRollback(*m, history, all)
-	case KindForward:
-		err = CheckForward(*m, history, all)
-	}
-	if err != nil {
-		return err
-	}
-
-	required, err := requiredApprovers(ctx, l.store, m.DatabaseID)
-	if err != nil {
-		return err
-	}
-	got, err := l.store.ListApprovals(ctx, m.ID, m.Revision, req.Kind)
-	if err != nil {
-		return fmt.Errorf("lifecycle: approvals: %w", err)
-	}
-	if !ApprovalsComplete(required, got) {
-		return fmt.Errorf("%w: revisi %d, kind=%s", ErrApprovalIncomplete, m.Revision, req.Kind)
-	}
-	return nil
-}
-
-// MarkRunning membuat baris attempt (running). Untuk apply, status migration
-// juga dipindah ke running. SQL yang dijalankan disalin ke attempt: UpSQL untuk
-// apply/forward, DownSQL untuk rollback.
-func (l *lifecycle) MarkRunning(ctx context.Context, req ExecutionRequest) (int64, error) {
-	m, err := l.load(ctx, req)
-	if err != nil {
-		return 0, err
-	}
-
-	if req.Kind == KindApply && m.Status != StatusRunning { // running = retry idempoten
-		if m.Status == StatusApproved { // worker mendahului Service.Decide
-			if err := moveStatus(ctx, l.store, m, StatusPendingQueue); err != nil {
-				return 0, fmt.Errorf("lifecycle: enqueue: %w", err)
-			}
-		}
-		if err := moveStatus(ctx, l.store, m, StatusRunning); err != nil {
-			return 0, fmt.Errorf("lifecycle: mark running: %w", err)
-		}
-	}
-
-	sql := m.UpSQL
-	var reverts *int64
-	if req.Kind == KindRollback {
-		if m.DownSQL == nil {
-			return 0, fmt.Errorf("%w: migration %d tidak punya DownSQL", ErrRollbackBlocked, m.ID)
-		}
-		sql = *m.DownSQL
-		history, err := l.store.ListExecutions(ctx, m.DatabaseID, HistoryFilter{MigrationID: &m.ID})
+func (l Lifecycle) Start(ctx context.Context, in queue.StartInput) (*queue.Execution, error) {
+	var (
+		exec     *queue.Execution
+		run      gen.MigrationRun
+		rejected error
+	)
+	err := pgx.BeginFunc(ctx, l.Pool, func(tx pgx.Tx) error {
+		q := gen.New(tx)
+		req, err := q.LockMigrationRequest(ctx, in.RequestID)
 		if err != nil {
-			return 0, fmt.Errorf("lifecycle: history: %w", err)
+			return missing(err)
 		}
-		reverts = lastAppliedExecutionID(history, m.ID)
-	}
-
-	att, err := l.store.InsertExecution(ctx, Execution{
-		MigrationID:        m.ID,
-		Revision:           m.Revision,
-		UserID:             req.RequestedBy,
-		Kind:               req.Kind,
-		Status:             StatusRunning,
-		ExecutedSQL:        sql,
-		RevertsExecutionID: reverts,
-		StartedAt:          l.now(),
+		row, err := q.GetMigration(ctx, req.MigrationID)
+		if err != nil {
+			return missing(err)
+		}
+		m := row.Migration
+		if req.Status != gen.RequestStatusQueued && req.Status != gen.RequestStatusRunning {
+			return conflict("request tidak sedang menunggu eksekusi")
+		}
+		rejected, err = l.revalidate(ctx, q, in, req, m)
+		if err != nil {
+			return err
+		}
+		if rejected != nil {
+			status := gen.RequestStatusFailed
+			committed, err := l.committed(ctx, q, in.JobID, m)
+			if err != nil {
+				return err
+			}
+			if committed {
+				status = gen.RequestStatusPartial
+			}
+			return q.SetMigrationRequestStatus(ctx, gen.SetMigrationRequestStatusParams{ID: req.ID, Status: status})
+		}
+		if run, err = l.insertRun(ctx, q, in, req, m); err != nil {
+			return err
+		}
+		exec = execution(run, m)
+		return q.SetMigrationRequestStatus(ctx, gen.SetMigrationRequestStatusParams{ID: req.ID, Status: gen.RequestStatusRunning})
 	})
 	if err != nil {
-		return 0, fmt.Errorf("lifecycle: insert attempt: %w", err)
+		return nil, err
 	}
-
-	if !m.SQLLocked {
-		if err := l.store.LockSQL(ctx, m.ID); err != nil {
-			_ = l.store.FinalizeExecution(ctx, att.ID, ExecutionResult{ErrorMsg: "gagal mengunci SQL: " + err.Error()}, l.now())
-			return 0, fmt.Errorf("lifecycle: lock sql: %w", err)
-		}
+	if rejected != nil {
+		slog.WarnContext(ctx, "migration.revalidate", "event", "migration.revalidate", "status", "rejected", "error", rejected.Error())
+		return nil, rejected
 	}
-	logExecution(ctx, att)
-	return att.ID, nil
+	slog.InfoContext(ctx, "migration.execution.start", append(runAttrs("migration.execution.start", run), "migration_id", run.MigrationID)...)
+	return exec, nil
 }
 
-// RecordResult menutup attempt (satu kali; riwayat tidak berubah setelahnya).
-// Untuk apply, status migration ikut menjadi success/failed.
-func (l *lifecycle) RecordResult(ctx context.Context, attemptID int64, res ExecutionResult) error {
-	if attemptID == 0 {
-		return errors.New("lifecycle: attemptID kosong")
+func (l Lifecycle) revalidate(ctx context.Context, q *gen.Queries, in queue.StartInput, req gen.MigrationRequest, m gen.Migration) (rejected, err error) {
+	level, err := l.Auth.EffectiveLevel(ctx, in.ActorID, m.DatabaseID)
+	if err != nil {
+		return nil, err
 	}
-	if res.Success && (res.ErrorMsg != "" || res.SQLState != "") {
-		return errors.New("lifecycle: Success=true tetapi ErrorMsg/SQLState terisi")
+	if level != authz.LevelEdit {
+		return apperr.New(apperr.CodeForbidden, "pengguna yang menjalankan tidak lagi punya akses View + Edit"), nil
 	}
-	cur, err := l.store.GetExecution(ctx, attemptID)
+	if req.Revision != m.Revision {
+		return conflict("migration berubah setelah disetujui; ajukan ulang"), nil
+	}
+	groups, err := q.ListRequestApprovals(ctx, gen.ListRequestApprovalsParams{DatabaseID: m.DatabaseID, RequestID: req.ID})
+	if err != nil {
+		return nil, err
+	}
+	if !approved(groups) {
+		return conflict("approval belum lengkap dari leader setiap group yang punya akses"), nil
+	}
+	st, err := loadState(ctx, q, m.DatabaseID)
+	if err != nil {
+		return nil, err
+	}
+	return st.check(req.Kind, m, req.ID), nil
+}
+
+func (l Lifecycle) committed(ctx context.Context, q *gen.Queries, jobID int64, m gen.Migration) (bool, error) {
+	if !m.BatchTable.Valid {
+		return false, nil
+	}
+	n, err := q.GetJobProgress(ctx, jobID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return n > 0, err
+}
+
+func (l Lifecycle) insertRun(ctx context.Context, q *gen.Queries, in queue.StartInput, req gen.MigrationRequest, m gen.Migration) (gen.MigrationRun, error) {
+	p := gen.InsertRunParams{
+		MigrationID: m.ID, DatabaseID: m.DatabaseID, ExecutedBy: in.ActorID,
+		RequestID: int8of(req.ID), JobID: int8of(in.JobID), Kind: req.Kind, Revision: m.Revision, Attempt: int32(in.Attempt),
+		SqlText: m.SqlText, Checksum: m.Checksum,
+	}
+	if req.Kind == gen.RequestKindRollback {
+		last, err := q.LastUpRun(ctx, m.ID)
+		if err != nil {
+			return gen.MigrationRun{}, missing(err)
+		}
+		p.SqlText, p.Checksum = m.DownSql.String, checksum(m.DownSql.String)
+		p.RevertsRunID, p.CheckpointRunID, p.Version = int8of(last.ID), int8of(last.CheckpointRunID), last.Version
+		if m.Version.Valid {
+			p.Version = m.Version
+		}
+		return q.InsertRun(ctx, p)
+	}
+	head, err := q.MigrationHead(ctx, m.DatabaseID)
+	if err != nil {
+		return gen.MigrationRun{}, err
+	}
+	p.Version = int4of(head + 1)
+	if m.BatchTable.Valid {
+		prev, err := q.LastRequestRun(ctx, int8of(req.ID))
+		switch {
+		case errors.Is(err, pgx.ErrNoRows):
+		case err != nil:
+			return gen.MigrationRun{}, err
+		case prev.Version == p.Version:
+			p.CheckpointRunID = int8of(prev.CheckpointRunID)
+		}
+	}
+	return q.InsertRun(ctx, p)
+}
+
+func execution(run gen.MigrationRun, m gen.Migration) *queue.Execution {
+	e := &queue.Execution{
+		RunID: run.ID, CheckpointRunID: run.ID, MigrationID: run.MigrationID, DatabaseID: run.DatabaseID,
+		Direction: dbms.DirectionUp, SQL: run.SqlText, Version: int(run.Version.Int32), Checksum: run.Checksum,
+	}
+	if run.CheckpointRunID.Valid {
+		e.CheckpointRunID = run.CheckpointRunID.Int64
+	}
+	if run.Kind == gen.RequestKindRollback {
+		e.Direction = dbms.DirectionDown
+	}
+	if b := batchOf(m); b != nil {
+		e.Batch = &dbms.BatchSpec{Schema: b.Schema, Table: b.Table, KeyColumn: b.Column, Size: b.Size}
+	}
+	return e
+}
+
+func (l Lifecycle) Finish(ctx context.Context, in queue.FinishInput) error {
+	var run gen.MigrationRun
+	params := gen.FinishRunParams{ID: in.RunID, Status: gen.RunStatusSucceeded}
+	if in.Err != nil {
+		params.Status = gen.RunStatusFailed
+		params.ErrorMessage = text(in.Err.Error())
+		var se *dbms.StatementError
+		if errors.As(in.Err, &se) {
+			params.ErrorCode = text(se.SQLState)
+			params.FailedStatementIndex = pgtype.Int4{Int32: int32(se.Index), Valid: se.Index > 0}
+		}
+	}
+	err := pgx.BeginFunc(ctx, l.Pool, func(tx pgx.Tx) error {
+		q := gen.New(tx)
+		var err error
+		if run, err = q.LockRun(ctx, in.RunID); err != nil {
+			return missing(err)
+		}
+		if run.Status != gen.RunStatusRunning {
+			return conflict("attempt ini sudah ditutup")
+		}
+		if err := q.FinishRun(ctx, params); err != nil {
+			return err
+		}
+		status, err := l.settle(ctx, q, run, in)
+		if err != nil {
+			return err
+		}
+		return q.SetMigrationRequestStatus(ctx, gen.SetMigrationRequestStatusParams{ID: run.RequestID.Int64, Status: status})
+	})
 	if err != nil {
 		return err
 	}
-	if !cur.FinishedAt.IsZero() || cur.Status != StatusRunning {
-		return fmt.Errorf("lifecycle: attempt %d sudah selesai (riwayat tidak dapat diubah)", attemptID)
+	attrs := runAttrs("migration.execution.end", run)
+	outcome := audit.OutcomeSuccess
+	if in.Err != nil {
+		outcome = audit.OutcomeFailure
+		slog.ErrorContext(ctx, "migration.execution.end", append(attrs, "status", string(params.Status),
+			"error", in.Err.Error(), "sqlstate", params.ErrorCode.String, "will_retry", in.WillRetry)...)
+	} else {
+		slog.InfoContext(ctx, "migration.execution.end", append(attrs, "status", string(params.Status))...)
 	}
-
-	now := l.now()
-	if err := l.store.FinalizeExecution(ctx, attemptID, res, now); err != nil {
-		return fmt.Errorf("lifecycle: finalize: %w", err)
-	}
-
-	final := StatusFailed
-	if res.Success {
-		final = StatusSuccess
-	}
-	done := *cur
-	done.Status = final
-	done.FinishedAt = now
-	done.ErrorMsg, done.SQLState = res.ErrorMsg, res.SQLState
-	if res.ExecutedSQL != "" {
-		done.ExecutedSQL = res.ExecutedSQL
-	}
-	logExecution(ctx, done)
-
-	if cur.Kind != KindApply {
-		return nil // rollback/forward tidak mengubah status migration
-	}
-	m, err := l.store.GetMigrationByID(ctx, cur.MigrationID)
-	if err != nil {
-		return fmt.Errorf("lifecycle: get migration: %w", err)
-	}
-	if err := moveStatus(ctx, l.store, m, final); err != nil {
-		return fmt.Errorf("lifecycle: attempt %d tercatat, status migration gagal diperbarui: %w", attemptID, err)
+	if l.Audit != nil {
+		l.Audit.Record(ctx, audit.Entry{
+			ActorID: run.ExecutedBy, Action: "migration." + string(run.Kind), ResourceType: "migration",
+			ResourceID: formatID(run.MigrationID), Outcome: outcome, Metadata: map[string]any{"executionId": run.ID},
+		})
 	}
 	return nil
 }
 
-func (l *lifecycle) load(ctx context.Context, req ExecutionRequest) (*Migration, error) {
-	if req.MigrationID == 0 {
-		return nil, errors.New("lifecycle: MigrationID kosong")
+func (l Lifecycle) settle(ctx context.Context, q *gen.Queries, run gen.MigrationRun, in queue.FinishInput) (gen.RequestStatus, error) {
+	if in.Err == nil {
+		if run.Kind != gen.RequestKindRollback {
+			return gen.RequestStatusSucceeded, q.MarkMigrationApplied(ctx, gen.MarkMigrationAppliedParams{
+				ID: run.MigrationID, Version: run.Version, AppliedBy: int8of(run.ExecutedBy),
+			})
+		}
+		if err := q.ClosePartialRequests(ctx, run.MigrationID); err != nil {
+			return "", err
+		}
+		return gen.RequestStatusSucceeded, q.MarkMigrationRolledBack(ctx, run.MigrationID)
 	}
-	if !req.Kind.IsValid() {
-		return nil, fmt.Errorf("lifecycle: kind %q tidak dikenal", req.Kind)
+	if in.WillRetry {
+		return gen.RequestStatusQueued, nil
 	}
-	return l.store.GetMigrationByID(ctx, req.MigrationID)
+	if in.Progress != nil {
+		if s := in.Progress.State(); s == dbms.BatchPartial || s == dbms.BatchPartiallyReverted {
+			return gen.RequestStatusPartial, nil
+		}
+		return gen.RequestStatusFailed, nil
+	}
+	row, err := q.GetMigration(ctx, run.MigrationID)
+	if err != nil {
+		return "", err
+	}
+	committed, err := l.committed(ctx, q, run.JobID.Int64, row.Migration)
+	if err != nil {
+		return "", err
+	}
+	if committed {
+		return gen.RequestStatusPartial, nil
+	}
+	return gen.RequestStatusFailed, nil
+}
+
+func (l Lifecycle) Interrupted(ctx context.Context, jobID int64, attempt int) (*queue.Execution, error) {
+	q := gen.New(l.Pool)
+	run, err := q.InterruptedRun(ctx, gen.InterruptedRunParams{JobID: int8of(jobID), Attempt: int32(attempt)})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	row, err := q.GetMigration(ctx, run.MigrationID)
+	if err != nil {
+		return nil, missing(err)
+	}
+	return execution(run, row.Migration), nil
+}
+
+func runAttrs(event string, run gen.MigrationRun) []any {
+	attrs := []any{
+		"event", event, "execution_id", run.ID, "kind", string(run.Kind), "revision", run.Revision,
+		"version", run.Version.Int32, "executed_by", run.ExecutedBy, "query", sqltrace.Mask(run.SqlText),
+	}
+	if run.RevertsRunID.Valid {
+		attrs = append(attrs, "reverts_execution_id", run.RevertsRunID.Int64)
+	}
+	return attrs
 }

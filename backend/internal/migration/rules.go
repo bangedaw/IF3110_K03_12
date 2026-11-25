@@ -1,229 +1,190 @@
 package migration
 
 import (
-	"fmt"
 	"slices"
-	"sort"
+
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apigen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 )
 
-// CheckApply memvalidasi apakah `m` boleh di-apply mengingat riwayat dan
-// daftar migration.
-//
-// Aturan:
-//   - m belum pernah dieksekusi (SQLLocked=false).
-//   - Tidak ada eksekusi lain yang masih running.
-//   - Urutan linear: m harus migration pertama yang belum aktif menurut Seq.
-func CheckApply(m Migration, history []Execution, all []Migration) error {
-	if m.SQLLocked {
-		return fmt.Errorf("%w: migration %d sudah pernah dieksekusi", ErrApplyBlocked, m.ID)
-	}
-	if id, busy := runningExecution(history); busy {
-		return fmt.Errorf("%w: ada eksekusi lain yang belum selesai (execution %d)", ErrApplyBlocked, id)
-	}
-
-	active := ActiveMigrations(history, all)
-	next, ok := nextPending(all, active)
-	if !ok {
-		return fmt.Errorf("%w: tidak ada migration pending", ErrNoPendingMigration)
-	}
-	if next.ID != m.ID {
-		return fmt.Errorf("%w: bukan giliran migration %d (berikutnya: %d %q)",
-			ErrApplyBlocked, m.ID, next.ID, next.Title)
-	}
-	return nil
+type positions struct {
+	active []int64
+	redo   []int64
 }
 
-// CheckRollback memvalidasi rollback `m`.
-//
-// Aturan: bukan irreversible, punya DownSQL, tidak ada eksekusi yang masih
-// running, m sedang aktif, dan m adalah migration aktif terakhir.
-func CheckRollback(m Migration, history []Execution, all []Migration) error {
-	if m.Irreversible {
-		reason := m.IrreversibleReason
-		if reason == "" {
-			reason = "(tanpa alasan)"
+func replay(runs []gen.ListSucceededRunsRow) positions {
+	var p positions
+	for _, r := range runs {
+		switch r.Kind {
+		case gen.RequestKindApply:
+			p.active = append(p.active, r.MigrationID)
+			p.redo = nil
+		case gen.RequestKindRollback:
+			p.active = without(p.active, r.MigrationID)
+			p.redo = append(without(p.redo, r.MigrationID), r.MigrationID)
+		case gen.RequestKindForward:
+			p.redo = without(p.redo, r.MigrationID)
+			p.active = append(p.active, r.MigrationID)
 		}
-		return fmt.Errorf("%w: migration %d: %s", ErrIrreversible, m.ID, reason)
 	}
-	if m.DownSQL == nil || *m.DownSQL == "" {
-		return fmt.Errorf("%w: migration %d tidak punya DownSQL", ErrRollbackBlocked, m.ID)
-	}
-	if id, busy := runningExecution(history); busy {
-		return fmt.Errorf("%w: ada eksekusi lain yang belum selesai (execution %d)", ErrRollbackBlocked, id)
-	}
-	if !wasApplied(m, history) {
-		return fmt.Errorf("%w: migration %d belum pernah sukses di-apply", ErrRollbackBlocked, m.ID)
-	}
+	return p
+}
 
-	active := ActiveMigrations(history, all)
-	if len(active) == 0 {
-		return fmt.Errorf("%w: tidak ada migration aktif", ErrRollbackBlocked)
-	}
-	head := active[len(active)-1]
-	if head.ID != m.ID {
-		return fmt.Errorf("%w: hanya migration aktif terakhir (%d %q) yang bisa di-rollback, bukan %d %q",
-			ErrRollbackBlocked, head.ID, head.Title, m.ID, m.Title)
+func without(ids []int64, id int64) []int64 {
+	return slices.DeleteFunc(ids, func(v int64) bool { return v == id })
+}
+
+func isLast(ids []int64, id int64) bool { return len(ids) > 0 && ids[len(ids)-1] == id }
+
+type state struct {
+	positions
+	requests []request
+}
+
+func (s state) latest(migrationID int64) *request {
+	return s.find(migrationID, func(request) bool { return true })
+}
+
+func (s state) current(migrationID int64) *request {
+	return s.find(migrationID, func(r request) bool { return r.Status != gen.RequestStatusRejected })
+}
+
+func (s state) open(migrationID int64) *request {
+	return s.find(migrationID, request.open)
+}
+
+func (s state) find(migrationID int64, match func(request) bool) *request {
+	for i := len(s.requests) - 1; i >= 0; i-- {
+		if r := s.requests[i]; r.MigrationID == migrationID && match(r) {
+			return &r
+		}
 	}
 	return nil
 }
 
-// CheckForward memvalidasi forward `m`.
-//
-// Aturan saat ini (belum diubah dari versi sebelumnya): m irreversible
-// ditolak, tidak ada eksekusi running, m pernah sukses, dan m bukan head.
-func CheckForward(m Migration, history []Execution, all []Migration) error {
-	if m.Irreversible {
-		return fmt.Errorf("%w: migration %d irreversible, tidak bisa forward", ErrIrreversible, m.ID)
+func (s state) status(m gen.Migration) apigen.MigrationStatus {
+	latest := s.latest(m.ID)
+	if latest == nil {
+		if m.Status == gen.MigStatusDraft {
+			return apigen.MigrationStatusDraft
+		}
+		return apigen.MigrationStatusSucceeded
 	}
-	if id, busy := runningExecution(history); busy {
-		return fmt.Errorf("%w: ada eksekusi lain yang belum selesai (execution %d)", ErrForwardBlocked, id)
+	if cur := s.current(m.ID); cur != nil && cur.Status == gen.RequestStatusPartial && !latest.open() {
+		return apigen.MigrationStatusPartial
 	}
-	if !wasApplied(m, history) {
-		return fmt.Errorf("%w: migration %d belum pernah sukses di-apply", ErrForwardBlocked, m.ID)
+	if m.Status == gen.MigStatusDraft && latest.Revision != m.Revision {
+		return apigen.MigrationStatusDraft
 	}
-
-	active := ActiveMigrations(history, all)
-	if len(active) == 0 {
-		return fmt.Errorf("%w: tidak ada migration aktif", ErrForwardBlocked)
-	}
-	head := active[len(active)-1]
-	if head.ID == m.ID {
-		return fmt.Errorf("%w: migration %d adalah head, tidak ada yang bisa di-forward", ErrForwardBlocked, m.ID)
-	}
-	return nil
+	return apigen.MigrationStatus(latest.effective())
 }
 
-// ActiveMigrations menghitung posisi aktif dari riwayat; hasil urut menaik
-// menurut Seq. Rollback gagal dan attempt yang belum selesai tidak mengubah
-// posisi. Sumber kebenaran adalah riwayat, bukan Migration.Status.
-func ActiveMigrations(history []Execution, all []Migration) []Migration {
-	byID := make(map[int64]Migration, len(all))
-	for _, m := range all {
-		byID[m.ID] = m
-	}
+func conflict(detail string) error { return apperr.New(apperr.CodeConflict, detail) }
 
-	state := make(map[int64]bool, len(all))
-	for _, e := range sortedExecutions(history) {
-		if e.Status != StatusSuccess {
+func (s state) check(kind gen.RequestKind, m gen.Migration, self int64) error {
+	var partialUp, partialDown bool
+	for _, r := range s.requests {
+		if r.Status != gen.RequestStatusPartial || r.ID == self {
 			continue
 		}
-		switch e.Kind {
-		case KindApply:
-			state[e.MigrationID] = true
-		case KindRollback:
-			state[e.MigrationID] = false
-		case KindForward:
-			state[e.MigrationID] = false
-			if next, ok := nextBySeq(byID, e.MigrationID); ok {
-				state[next.ID] = true
-			}
+		if r.MigrationID != m.ID {
+			return conflict("migration lain di database ini masih partial; lanjutkan atau batalkan dulu")
+		}
+		if r.up() {
+			partialUp = true
+		} else {
+			partialDown = true
 		}
 	}
+	if partialDown {
+		return conflict("rollback migration ini masih partial; lanjutkan dulu sampai selesai")
+	}
+	switch kind {
+	case gen.RequestKindApply, gen.RequestKindForward:
+		if partialUp {
+			return conflict("migration ini masih partial; lanjutkan atau rollback dulu")
+		}
+		if kind == gen.RequestKindApply && m.Status != gen.MigStatusDraft {
+			return conflict("migration sudah pernah diterapkan; gunakan rollback atau forward")
+		}
+		if kind == gen.RequestKindForward && !isLast(s.redo, m.ID) {
+			return conflict("forward hanya untuk migration yang paling akhir di-rollback, selama belum ada migration baru yang diterapkan")
+		}
+	case gen.RequestKindRollback:
+		if m.Irreversible || !m.DownSql.Valid {
+			return conflict("migration irreversible tidak bisa di-rollback: " + m.IrreversibleReason)
+		}
+		if !partialUp && !isLast(s.active, m.ID) {
+			return conflict("rollback hanya untuk migration aktif terakhir")
+		}
+	}
+	return nil
+}
 
-	out := make([]Migration, 0, len(state))
-	for id, applied := range state {
-		if !applied {
-			continue
+func (s state) checkNew(kind gen.RequestKind, m gen.Migration) error {
+	if s.open(m.ID) != nil {
+		return conflict("masih ada request yang belum selesai untuk migration ini")
+	}
+	return s.check(kind, m, 0)
+}
+
+func (s state) executable(m gen.Migration) *request {
+	cur := s.current(m.ID)
+	if cur == nil || cur.Revision != m.Revision {
+		return nil
+	}
+	switch cur.effective() {
+	case gen.RequestStatusApproved, gen.RequestStatusPartial:
+	case gen.RequestStatusFailed:
+		if s.latest(m.ID).ID != cur.ID {
+			return nil
 		}
-		if m, ok := byID[id]; ok {
-			out = append(out, m)
+	default:
+		return nil
+	}
+	if s.check(cur.Kind, m, cur.ID) != nil {
+		return nil
+	}
+	return cur
+}
+
+func (s state) editable(m gen.Migration, sqlLocked bool) error {
+	switch {
+	case sqlLocked:
+		return conflict("SQL migration yang pernah dieksekusi tidak bisa diubah; buat migration baru")
+	case m.Status != gen.MigStatusDraft:
+		return conflict("hanya draft yang bisa diubah")
+	case s.open(m.ID) != nil:
+		return conflict("draft tidak bisa diubah selama masih ada request yang belum selesai")
+	}
+	return nil
+}
+
+func (s state) actions(m gen.Migration, sqlLocked bool, level authz.Level) []apigen.MigrationAction {
+	out := []apigen.MigrationAction{}
+	if level != authz.LevelEdit {
+		return out
+	}
+	if s.editable(m, sqlLocked) == nil {
+		out = append(out, apigen.MigrationActionEdit, apigen.MigrationActionDelete)
+	}
+	if s.executable(m) != nil {
+		out = append(out, apigen.MigrationActionExecute)
+	}
+	for kind, action := range map[gen.RequestKind]apigen.MigrationAction{
+		gen.RequestKindApply:    apigen.MigrationActionSubmit,
+		gen.RequestKindRollback: apigen.MigrationActionRollback,
+		gen.RequestKindForward:  apigen.MigrationActionForward,
+	} {
+		if s.checkNew(kind, m) == nil {
+			out = append(out, action)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Seq < out[j].Seq })
+	if !m.BatchTable.Valid {
+		out = append(out, apigen.MigrationActionExplain)
+	}
+	slices.Sort(out)
 	return out
-}
-
-// lastAppliedExecutionID mengembalikan ID execution sukses (apply/forward)
-// terakhir milik migrationID yang belum dibatalkan rollback sukses. Dipakai
-// sebagai Execution.RevertsExecutionID saat rollback.
-func lastAppliedExecutionID(history []Execution, migrationID int64) *int64 {
-	var id *int64
-	for _, e := range sortedExecutions(history) {
-		if e.MigrationID != migrationID || e.Status != StatusSuccess {
-			continue
-		}
-		switch e.Kind {
-		case KindApply, KindForward:
-			v := e.ID
-			id = &v
-		case KindRollback:
-			id = nil
-		}
-	}
-	return id
-}
-
-// --- helper internal ---
-
-func runningExecution(history []Execution) (int64, bool) {
-	for _, e := range history {
-		if e.Status == StatusRunning {
-			return e.ID, true
-		}
-	}
-	return 0, false
-}
-
-func sortedExecutions(history []Execution) []Execution {
-	hs := slices.Clone(history)
-	sortExecutions(hs)
-	return hs
-}
-
-// wasApplied: apakah m sedang dalam kondisi applied menurut riwayat.
-func wasApplied(m Migration, history []Execution) bool {
-	applied := false
-	for _, e := range sortedExecutions(history) {
-		if e.Status != StatusSuccess || e.MigrationID != m.ID {
-			continue
-		}
-		switch e.Kind {
-		case KindApply, KindForward:
-			applied = true
-		case KindRollback:
-			applied = false
-		}
-	}
-	return applied
-}
-
-// nextPending: migration berikutnya (urut Seq) yang belum aktif.
-func nextPending(all []Migration, active []Migration) (Migration, bool) {
-	applied := make(map[int64]struct{}, len(active))
-	for _, m := range active {
-		applied[m.ID] = struct{}{}
-	}
-	candidates := make([]Migration, 0, len(all))
-	for _, m := range all {
-		if _, ok := applied[m.ID]; !ok {
-			candidates = append(candidates, m)
-		}
-	}
-	if len(candidates) == 0 {
-		return Migration{}, false
-	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].Seq < candidates[j].Seq })
-	return candidates[0], true
-}
-
-// nextBySeq: migration dengan Seq terkecil di atas migration `id`.
-func nextBySeq(byID map[int64]Migration, id int64) (Migration, bool) {
-	cur, ok := byID[id]
-	if !ok {
-		return Migration{}, false
-	}
-	var best *Migration
-	for _, m := range byID {
-		if m.Seq <= cur.Seq {
-			continue
-		}
-		if best == nil || m.Seq < best.Seq {
-			mm := m
-			best = &mm
-		}
-	}
-	if best == nil {
-		return Migration{}, false
-	}
-	return *best, true
 }

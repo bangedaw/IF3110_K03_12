@@ -11,132 +11,102 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const countMigrationHistory = `-- name: CountMigrationHistory :one
-SELECT count(*) FROM migration_runs WHERE database_id = $1
+const closePartialRequests = `-- name: ClosePartialRequests :exec
+UPDATE migration_requests
+SET status = 'failed', updated_at = now()
+WHERE migration_id = $1 AND status = 'partial'
 `
 
-func (q *Queries) CountMigrationHistory(ctx context.Context, databaseID int64) (int64, error) {
-	row := q.db.QueryRow(ctx, countMigrationHistory, databaseID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+func (q *Queries) ClosePartialRequests(ctx context.Context, migrationID int64) error {
+	_, err := q.db.Exec(ctx, closePartialRequests, migrationID)
+	return err
 }
 
-const countMigrations = `-- name: CountMigrations :one
-SELECT count(*) FROM migrations
-WHERE database_id = $1
-  AND ($2::mig_status IS NULL OR status = $2::mig_status)
+const createMigration = `-- name: CreateMigration :one
+INSERT INTO migrations (database_id, title, description, sql_text, down_sql, checksum, irreversible, irreversible_reason,
+                        batch_schema, batch_table, batch_column, batch_size, base_version, created_by, updated_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
+        $9, $10, $11, $12,
+        $13, $14, $14)
+RETURNING id
 `
 
-type CountMigrationsParams struct {
-	DatabaseID int64
-	Status     NullMigStatus
+type CreateMigrationParams struct {
+	DatabaseID         int64
+	Title              string
+	Description        string
+	SqlText            string
+	DownSql            pgtype.Text
+	Checksum           []byte
+	Irreversible       bool
+	IrreversibleReason string
+	BatchSchema        pgtype.Text
+	BatchTable         pgtype.Text
+	BatchColumn        pgtype.Text
+	BatchSize          pgtype.Int4
+	BaseVersion        int32
+	Actor              int64
 }
 
-func (q *Queries) CountMigrations(ctx context.Context, arg CountMigrationsParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countMigrations, arg.DatabaseID, arg.Status)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const createMigrationDraft = `-- name: CreateMigrationDraft :one
-INSERT INTO migrations (database_id, title, description, sql_text, checksum, base_version, created_by, updated_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
-RETURNING id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size, batch_schema
-`
-
-type CreateMigrationDraftParams struct {
-	DatabaseID  int64
-	Title       string
-	Description string
-	SqlText     string
-	Checksum    []byte
-	BaseVersion int32
-	Actor       int64
-}
-
-func (q *Queries) CreateMigrationDraft(ctx context.Context, arg CreateMigrationDraftParams) (Migration, error) {
-	row := q.db.QueryRow(ctx, createMigrationDraft,
+func (q *Queries) CreateMigration(ctx context.Context, arg CreateMigrationParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createMigration,
 		arg.DatabaseID,
 		arg.Title,
 		arg.Description,
 		arg.SqlText,
+		arg.DownSql,
 		arg.Checksum,
+		arg.Irreversible,
+		arg.IrreversibleReason,
+		arg.BatchSchema,
+		arg.BatchTable,
+		arg.BatchColumn,
+		arg.BatchSize,
 		arg.BaseVersion,
 		arg.Actor,
 	)
-	var i Migration
-	err := row.Scan(
-		&i.ID,
-		&i.DatabaseID,
-		&i.Title,
-		&i.Description,
-		&i.SqlText,
-		&i.Checksum,
-		&i.Status,
-		&i.Version,
-		&i.BaseVersion,
-		&i.Revision,
-		&i.CreatedBy,
-		&i.UpdatedBy,
-		&i.AppliedBy,
-		&i.AppliedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DownSql,
-		&i.Irreversible,
-		&i.IrreversibleReason,
-		&i.BatchTable,
-		&i.BatchColumn,
-		&i.BatchSize,
-		&i.BatchSchema,
-	)
-	return i, err
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
-const createRunSnapshot = `-- name: CreateRunSnapshot :exec
-INSERT INTO schema_snapshots (database_id, migration_run_id, taken_by, model)
-VALUES ($1, $2, $3, $4)
+const createMigrationRequest = `-- name: CreateMigrationRequest :one
+INSERT INTO migration_requests (migration_id, database_id, kind, revision, requested_by)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id
 `
 
-type CreateRunSnapshotParams struct {
-	DatabaseID     int64
-	MigrationRunID pgtype.Int8
-	TakenBy        pgtype.Int8
-	Model          []byte
+type CreateMigrationRequestParams struct {
+	MigrationID int64
+	DatabaseID  int64
+	Kind        RequestKind
+	Revision    int32
+	RequestedBy int64
 }
 
-func (q *Queries) CreateRunSnapshot(ctx context.Context, arg CreateRunSnapshotParams) error {
-	_, err := q.db.Exec(ctx, createRunSnapshot,
+func (q *Queries) CreateMigrationRequest(ctx context.Context, arg CreateMigrationRequestParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createMigrationRequest,
+		arg.MigrationID,
 		arg.DatabaseID,
-		arg.MigrationRunID,
-		arg.TakenBy,
-		arg.Model,
+		arg.Kind,
+		arg.Revision,
+		arg.RequestedBy,
 	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const deleteMigration = `-- name: DeleteMigration :exec
+DELETE FROM migrations WHERE id = $1
+`
+
+func (q *Queries) DeleteMigration(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, deleteMigration, id)
 	return err
 }
 
-const deleteMigrationDraft = `-- name: DeleteMigrationDraft :execrows
-DELETE FROM migrations
-WHERE id = $1 AND database_id = $2 AND status = 'draft' AND revision = $3
-`
-
-type DeleteMigrationDraftParams struct {
-	ID         int64
-	DatabaseID int64
-	Revision   int32
-}
-
-func (q *Queries) DeleteMigrationDraft(ctx context.Context, arg DeleteMigrationDraftParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteMigrationDraft, arg.ID, arg.DatabaseID, arg.Revision)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const finishMigrationRun = `-- name: FinishMigrationRun :one
+const finishRun = `-- name: FinishRun :exec
 UPDATE migration_runs
 SET status                 = $1,
     finished_at            = now(),
@@ -144,10 +114,9 @@ SET status                 = $1,
     error_message          = $3,
     failed_statement_index = $4
 WHERE id = $5
-RETURNING migration_id, executed_by
 `
 
-type FinishMigrationRunParams struct {
+type FinishRunParams struct {
 	Status               RunStatus
 	ErrorCode            pgtype.Text
 	ErrorMessage         pgtype.Text
@@ -155,22 +124,15 @@ type FinishMigrationRunParams struct {
 	ID                   int64
 }
 
-type FinishMigrationRunRow struct {
-	MigrationID int64
-	ExecutedBy  int64
-}
-
-func (q *Queries) FinishMigrationRun(ctx context.Context, arg FinishMigrationRunParams) (FinishMigrationRunRow, error) {
-	row := q.db.QueryRow(ctx, finishMigrationRun,
+func (q *Queries) FinishRun(ctx context.Context, arg FinishRunParams) error {
+	_, err := q.db.Exec(ctx, finishRun,
 		arg.Status,
 		arg.ErrorCode,
 		arg.ErrorMessage,
 		arg.FailedStatementIndex,
 		arg.ID,
 	)
-	var i FinishMigrationRunRow
-	err := row.Scan(&i.MigrationID, &i.ExecutedBy)
-	return i, err
+	return err
 }
 
 const getDatabaseKind = `-- name: GetDatabaseKind :one
@@ -184,77 +146,130 @@ func (q *Queries) GetDatabaseKind(ctx context.Context, id int64) (DbmsKind, erro
 	return kind, err
 }
 
-const getMigration = `-- name: GetMigration :one
-SELECT id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size, batch_schema FROM migrations WHERE id = $1 AND database_id = $2
+const getJobProgress = `-- name: GetJobProgress :one
+SELECT batches_committed FROM jobs WHERE id = $1
 `
 
-type GetMigrationParams struct {
-	ID         int64
-	DatabaseID int64
+func (q *Queries) GetJobProgress(ctx context.Context, id int64) (int32, error) {
+	row := q.db.QueryRow(ctx, getJobProgress, id)
+	var batches_committed int32
+	err := row.Scan(&batches_committed)
+	return batches_committed, err
 }
 
-func (q *Queries) GetMigration(ctx context.Context, arg GetMigrationParams) (Migration, error) {
-	row := q.db.QueryRow(ctx, getMigration, arg.ID, arg.DatabaseID)
-	var i Migration
+const getMigration = `-- name: GetMigration :one
+SELECT m.id, m.database_id, m.title, m.description, m.sql_text, m.checksum, m.status, m.version, m.base_version, m.revision, m.created_by, m.updated_by, m.applied_by, m.applied_at, m.created_at, m.updated_at, m.down_sql, m.irreversible, m.irreversible_reason, m.batch_table, m.batch_column, m.batch_size, m.batch_schema,
+       u.username AS created_by_name,
+       EXISTS (SELECT 1 FROM migration_runs r WHERE r.migration_id = m.id) AS sql_locked
+FROM migrations m
+         JOIN users u ON u.id = m.created_by
+WHERE m.id = $1
+`
+
+type GetMigrationRow struct {
+	Migration     Migration
+	CreatedByName string
+	SqlLocked     bool
+}
+
+func (q *Queries) GetMigration(ctx context.Context, id int64) (GetMigrationRow, error) {
+	row := q.db.QueryRow(ctx, getMigration, id)
+	var i GetMigrationRow
 	err := row.Scan(
-		&i.ID,
-		&i.DatabaseID,
-		&i.Title,
-		&i.Description,
-		&i.SqlText,
-		&i.Checksum,
-		&i.Status,
-		&i.Version,
-		&i.BaseVersion,
-		&i.Revision,
-		&i.CreatedBy,
-		&i.UpdatedBy,
-		&i.AppliedBy,
-		&i.AppliedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DownSql,
-		&i.Irreversible,
-		&i.IrreversibleReason,
-		&i.BatchTable,
-		&i.BatchColumn,
-		&i.BatchSize,
-		&i.BatchSchema,
+		&i.Migration.ID,
+		&i.Migration.DatabaseID,
+		&i.Migration.Title,
+		&i.Migration.Description,
+		&i.Migration.SqlText,
+		&i.Migration.Checksum,
+		&i.Migration.Status,
+		&i.Migration.Version,
+		&i.Migration.BaseVersion,
+		&i.Migration.Revision,
+		&i.Migration.CreatedBy,
+		&i.Migration.UpdatedBy,
+		&i.Migration.AppliedBy,
+		&i.Migration.AppliedAt,
+		&i.Migration.CreatedAt,
+		&i.Migration.UpdatedAt,
+		&i.Migration.DownSql,
+		&i.Migration.Irreversible,
+		&i.Migration.IrreversibleReason,
+		&i.Migration.BatchTable,
+		&i.Migration.BatchColumn,
+		&i.Migration.BatchSize,
+		&i.Migration.BatchSchema,
+		&i.CreatedByName,
+		&i.SqlLocked,
 	)
 	return i, err
 }
 
-const getMigrationRun = `-- name: GetMigrationRun :one
-SELECT r.id, r.migration_id, r.database_id, r.sql_text, r.checksum, r.executed_by, r.status, r.started_at,
-       r.finished_at, r.error_code, r.error_message, r.failed_statement_index,
-       m.title, m.version, u.username AS executed_by_name
-FROM migration_runs r
-         JOIN migrations m ON m.id = r.migration_id
-         JOIN users u ON u.id = r.executed_by
-WHERE r.id = $1
+const insertApproval = `-- name: InsertApproval :exec
+INSERT INTO migration_approvals (request_id, group_id, approved, decided_by, comment)
+VALUES ($1, $2, $3, $4, $5)
 `
 
-type GetMigrationRunRow struct {
-	ID                   int64
-	MigrationID          int64
-	DatabaseID           int64
-	SqlText              string
-	Checksum             []byte
-	ExecutedBy           int64
-	Status               RunStatus
-	StartedAt            pgtype.Timestamptz
-	FinishedAt           pgtype.Timestamptz
-	ErrorCode            pgtype.Text
-	ErrorMessage         pgtype.Text
-	FailedStatementIndex pgtype.Int4
-	Title                string
-	Version              pgtype.Int4
-	ExecutedByName       string
+type InsertApprovalParams struct {
+	RequestID int64
+	GroupID   int64
+	Approved  bool
+	DecidedBy int64
+	Comment   string
 }
 
-func (q *Queries) GetMigrationRun(ctx context.Context, id int64) (GetMigrationRunRow, error) {
-	row := q.db.QueryRow(ctx, getMigrationRun, id)
-	var i GetMigrationRunRow
+func (q *Queries) InsertApproval(ctx context.Context, arg InsertApprovalParams) error {
+	_, err := q.db.Exec(ctx, insertApproval,
+		arg.RequestID,
+		arg.GroupID,
+		arg.Approved,
+		arg.DecidedBy,
+		arg.Comment,
+	)
+	return err
+}
+
+const insertRun = `-- name: InsertRun :one
+INSERT INTO migration_runs (migration_id, database_id, sql_text, checksum, executed_by, status, request_id, job_id,
+                            kind, revision, attempt, version, reverts_run_id, checkpoint_run_id)
+VALUES ($1, $2, $3, $4, $5, 'running', $6, $7,
+        $8, $9, $10, $11, $12, $13)
+RETURNING id, migration_id, database_id, sql_text, checksum, executed_by, status, started_at, finished_at, error_code, error_message, failed_statement_index, request_id, job_id, kind, revision, attempt, reverts_run_id, version, checkpoint_run_id
+`
+
+type InsertRunParams struct {
+	MigrationID     int64
+	DatabaseID      int64
+	SqlText         string
+	Checksum        []byte
+	ExecutedBy      int64
+	RequestID       pgtype.Int8
+	JobID           pgtype.Int8
+	Kind            RequestKind
+	Revision        int32
+	Attempt         int32
+	Version         pgtype.Int4
+	RevertsRunID    pgtype.Int8
+	CheckpointRunID pgtype.Int8
+}
+
+func (q *Queries) InsertRun(ctx context.Context, arg InsertRunParams) (MigrationRun, error) {
+	row := q.db.QueryRow(ctx, insertRun,
+		arg.MigrationID,
+		arg.DatabaseID,
+		arg.SqlText,
+		arg.Checksum,
+		arg.ExecutedBy,
+		arg.RequestID,
+		arg.JobID,
+		arg.Kind,
+		arg.Revision,
+		arg.Attempt,
+		arg.Version,
+		arg.RevertsRunID,
+		arg.CheckpointRunID,
+	)
+	var i MigrationRun
 	err := row.Scan(
 		&i.ID,
 		&i.MigrationID,
@@ -268,74 +283,146 @@ func (q *Queries) GetMigrationRun(ctx context.Context, id int64) (GetMigrationRu
 		&i.ErrorCode,
 		&i.ErrorMessage,
 		&i.FailedStatementIndex,
-		&i.Title,
+		&i.RequestID,
+		&i.JobID,
+		&i.Kind,
+		&i.Revision,
+		&i.Attempt,
+		&i.RevertsRunID,
 		&i.Version,
-		&i.ExecutedByName,
+		&i.CheckpointRunID,
 	)
 	return i, err
 }
 
-const listMigrationHistory = `-- name: ListMigrationHistory :many
-SELECT r.id, r.migration_id, r.database_id, r.sql_text, r.checksum, r.executed_by, r.status, r.started_at,
-       r.finished_at, r.error_code, r.error_message, r.failed_statement_index,
-       m.title, m.version, u.username AS executed_by_name
-FROM migration_runs r
-         JOIN migrations m ON m.id = r.migration_id
-         JOIN users u ON u.id = r.executed_by
-WHERE r.database_id = $1
-ORDER BY r.started_at DESC, r.id DESC
-LIMIT $3 OFFSET $2
+const interruptedRun = `-- name: InterruptedRun :one
+SELECT id, migration_id, database_id, sql_text, checksum, executed_by, status, started_at, finished_at, error_code, error_message, failed_statement_index, request_id, job_id, kind, revision, attempt, reverts_run_id, version, checkpoint_run_id FROM migration_runs
+WHERE job_id = $1 AND attempt = $2 AND status = 'running'
+ORDER BY id DESC
+LIMIT 1
 `
 
-type ListMigrationHistoryParams struct {
-	DatabaseID int64
-	Off        int32
-	Lim        int32
+type InterruptedRunParams struct {
+	JobID   pgtype.Int8
+	Attempt int32
 }
 
-type ListMigrationHistoryRow struct {
-	ID                   int64
-	MigrationID          int64
-	DatabaseID           int64
-	SqlText              string
-	Checksum             []byte
-	ExecutedBy           int64
-	Status               RunStatus
-	StartedAt            pgtype.Timestamptz
-	FinishedAt           pgtype.Timestamptz
-	ErrorCode            pgtype.Text
-	ErrorMessage         pgtype.Text
-	FailedStatementIndex pgtype.Int4
-	Title                string
-	Version              pgtype.Int4
-	ExecutedByName       string
+func (q *Queries) InterruptedRun(ctx context.Context, arg InterruptedRunParams) (MigrationRun, error) {
+	row := q.db.QueryRow(ctx, interruptedRun, arg.JobID, arg.Attempt)
+	var i MigrationRun
+	err := row.Scan(
+		&i.ID,
+		&i.MigrationID,
+		&i.DatabaseID,
+		&i.SqlText,
+		&i.Checksum,
+		&i.ExecutedBy,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.FailedStatementIndex,
+		&i.RequestID,
+		&i.JobID,
+		&i.Kind,
+		&i.Revision,
+		&i.Attempt,
+		&i.RevertsRunID,
+		&i.Version,
+		&i.CheckpointRunID,
+	)
+	return i, err
 }
 
-func (q *Queries) ListMigrationHistory(ctx context.Context, arg ListMigrationHistoryParams) ([]ListMigrationHistoryRow, error) {
-	rows, err := q.db.Query(ctx, listMigrationHistory, arg.DatabaseID, arg.Off, arg.Lim)
+const lastRequestRun = `-- name: LastRequestRun :one
+SELECT id, COALESCE(checkpoint_run_id, id)::bigint AS checkpoint_run_id, version
+FROM migration_runs
+WHERE request_id = $1
+ORDER BY id DESC
+LIMIT 1
+`
+
+type LastRequestRunRow struct {
+	ID              int64
+	CheckpointRunID int64
+	Version         pgtype.Int4
+}
+
+func (q *Queries) LastRequestRun(ctx context.Context, requestID pgtype.Int8) (LastRequestRunRow, error) {
+	row := q.db.QueryRow(ctx, lastRequestRun, requestID)
+	var i LastRequestRunRow
+	err := row.Scan(&i.ID, &i.CheckpointRunID, &i.Version)
+	return i, err
+}
+
+const lastUpRun = `-- name: LastUpRun :one
+SELECT r.id, COALESCE(r.checkpoint_run_id, r.id)::bigint AS checkpoint_run_id, r.version
+FROM migration_runs r
+         JOIN migrations m ON m.id = r.migration_id
+WHERE r.migration_id = $1
+  AND r.kind IN ('apply', 'forward')
+  AND (m.status <> 'applied' OR r.status = 'succeeded')
+ORDER BY r.id DESC
+LIMIT 1
+`
+
+type LastUpRunRow struct {
+	ID              int64
+	CheckpointRunID int64
+	Version         pgtype.Int4
+}
+
+func (q *Queries) LastUpRun(ctx context.Context, migrationID int64) (LastUpRunRow, error) {
+	row := q.db.QueryRow(ctx, lastUpRun, migrationID)
+	var i LastUpRunRow
+	err := row.Scan(&i.ID, &i.CheckpointRunID, &i.Version)
+	return i, err
+}
+
+const listDatabaseRequests = `-- name: ListDatabaseRequests :many
+SELECT r.id, r.migration_id, r.kind, r.status, r.revision, r.created_at,
+       u.username AS requested_by_name,
+       j.id AS job_id,
+       COALESCE(j.status::text, '')::text AS job_status
+FROM migration_requests r
+         JOIN users u ON u.id = r.requested_by
+         LEFT JOIN jobs j ON j.request_id = r.id
+WHERE r.database_id = $1
+ORDER BY r.id
+`
+
+type ListDatabaseRequestsRow struct {
+	ID              int64
+	MigrationID     int64
+	Kind            RequestKind
+	Status          RequestStatus
+	Revision        int32
+	CreatedAt       pgtype.Timestamptz
+	RequestedByName string
+	JobID           pgtype.Int8
+	JobStatus       string
+}
+
+func (q *Queries) ListDatabaseRequests(ctx context.Context, databaseID int64) ([]ListDatabaseRequestsRow, error) {
+	rows, err := q.db.Query(ctx, listDatabaseRequests, databaseID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListMigrationHistoryRow
+	var items []ListDatabaseRequestsRow
 	for rows.Next() {
-		var i ListMigrationHistoryRow
+		var i ListDatabaseRequestsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.MigrationID,
-			&i.DatabaseID,
-			&i.SqlText,
-			&i.Checksum,
-			&i.ExecutedBy,
+			&i.Kind,
 			&i.Status,
-			&i.StartedAt,
-			&i.FinishedAt,
-			&i.ErrorCode,
-			&i.ErrorMessage,
-			&i.FailedStatementIndex,
-			&i.Title,
-			&i.Version,
-			&i.ExecutedByName,
+			&i.Revision,
+			&i.CreatedAt,
+			&i.RequestedByName,
+			&i.JobID,
+			&i.JobStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -347,64 +434,52 @@ func (q *Queries) ListMigrationHistory(ctx context.Context, arg ListMigrationHis
 	return items, nil
 }
 
-const listMigrationRuns = `-- name: ListMigrationRuns :many
-SELECT r.id, r.migration_id, r.database_id, r.sql_text, r.checksum, r.executed_by, r.status, r.started_at,
-       r.finished_at, r.error_code, r.error_message, r.failed_statement_index,
-       m.title, m.version, u.username AS executed_by_name
+const listExecutions = `-- name: ListExecutions :many
+SELECT r.id, r.migration_id, r.database_id, r.sql_text, r.checksum, r.executed_by, r.status, r.started_at, r.finished_at, r.error_code, r.error_message, r.failed_statement_index, r.request_id, r.job_id, r.kind, r.revision, r.attempt, r.reverts_run_id, r.version, r.checkpoint_run_id, m.title, u.username AS executed_by_name
 FROM migration_runs r
          JOIN migrations m ON m.id = r.migration_id
          JOIN users u ON u.id = r.executed_by
-WHERE r.migration_id = $1 AND r.database_id = $2
-ORDER BY r.started_at DESC, r.id DESC
+WHERE r.database_id = $1
+ORDER BY r.id DESC
 `
 
-type ListMigrationRunsParams struct {
-	MigrationID int64
-	DatabaseID  int64
+type ListExecutionsRow struct {
+	MigrationRun   MigrationRun
+	Title          string
+	ExecutedByName string
 }
 
-type ListMigrationRunsRow struct {
-	ID                   int64
-	MigrationID          int64
-	DatabaseID           int64
-	SqlText              string
-	Checksum             []byte
-	ExecutedBy           int64
-	Status               RunStatus
-	StartedAt            pgtype.Timestamptz
-	FinishedAt           pgtype.Timestamptz
-	ErrorCode            pgtype.Text
-	ErrorMessage         pgtype.Text
-	FailedStatementIndex pgtype.Int4
-	Title                string
-	Version              pgtype.Int4
-	ExecutedByName       string
-}
-
-func (q *Queries) ListMigrationRuns(ctx context.Context, arg ListMigrationRunsParams) ([]ListMigrationRunsRow, error) {
-	rows, err := q.db.Query(ctx, listMigrationRuns, arg.MigrationID, arg.DatabaseID)
+func (q *Queries) ListExecutions(ctx context.Context, databaseID int64) ([]ListExecutionsRow, error) {
+	rows, err := q.db.Query(ctx, listExecutions, databaseID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListMigrationRunsRow
+	var items []ListExecutionsRow
 	for rows.Next() {
-		var i ListMigrationRunsRow
+		var i ListExecutionsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.MigrationID,
-			&i.DatabaseID,
-			&i.SqlText,
-			&i.Checksum,
-			&i.ExecutedBy,
-			&i.Status,
-			&i.StartedAt,
-			&i.FinishedAt,
-			&i.ErrorCode,
-			&i.ErrorMessage,
-			&i.FailedStatementIndex,
+			&i.MigrationRun.ID,
+			&i.MigrationRun.MigrationID,
+			&i.MigrationRun.DatabaseID,
+			&i.MigrationRun.SqlText,
+			&i.MigrationRun.Checksum,
+			&i.MigrationRun.ExecutedBy,
+			&i.MigrationRun.Status,
+			&i.MigrationRun.StartedAt,
+			&i.MigrationRun.FinishedAt,
+			&i.MigrationRun.ErrorCode,
+			&i.MigrationRun.ErrorMessage,
+			&i.MigrationRun.FailedStatementIndex,
+			&i.MigrationRun.RequestID,
+			&i.MigrationRun.JobID,
+			&i.MigrationRun.Kind,
+			&i.MigrationRun.Revision,
+			&i.MigrationRun.Attempt,
+			&i.MigrationRun.RevertsRunID,
+			&i.MigrationRun.Version,
+			&i.MigrationRun.CheckpointRunID,
 			&i.Title,
-			&i.Version,
 			&i.ExecutedByName,
 		); err != nil {
 			return nil, err
@@ -418,58 +493,117 @@ func (q *Queries) ListMigrationRuns(ctx context.Context, arg ListMigrationRunsPa
 }
 
 const listMigrations = `-- name: ListMigrations :many
-SELECT id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size, batch_schema FROM migrations
-WHERE database_id = $1
-  AND ($2::mig_status IS NULL OR status = $2::mig_status)
-ORDER BY version DESC NULLS FIRST, id DESC
-LIMIT $4 OFFSET $3
+SELECT m.id, m.database_id, m.title, m.description, m.sql_text, m.checksum, m.status, m.version, m.base_version, m.revision, m.created_by, m.updated_by, m.applied_by, m.applied_at, m.created_at, m.updated_at, m.down_sql, m.irreversible, m.irreversible_reason, m.batch_table, m.batch_column, m.batch_size, m.batch_schema,
+       u.username AS created_by_name,
+       EXISTS (SELECT 1 FROM migration_runs r WHERE r.migration_id = m.id) AS sql_locked
+FROM migrations m
+         JOIN users u ON u.id = m.created_by
+WHERE m.database_id = $1
+ORDER BY m.id DESC
 `
 
-type ListMigrationsParams struct {
-	DatabaseID int64
-	Status     NullMigStatus
-	Off        int32
-	Lim        int32
+type ListMigrationsRow struct {
+	Migration     Migration
+	CreatedByName string
+	SqlLocked     bool
 }
 
-func (q *Queries) ListMigrations(ctx context.Context, arg ListMigrationsParams) ([]Migration, error) {
-	rows, err := q.db.Query(ctx, listMigrations,
-		arg.DatabaseID,
-		arg.Status,
-		arg.Off,
-		arg.Lim,
-	)
+func (q *Queries) ListMigrations(ctx context.Context, databaseID int64) ([]ListMigrationsRow, error) {
+	rows, err := q.db.Query(ctx, listMigrations, databaseID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Migration
+	var items []ListMigrationsRow
 	for rows.Next() {
-		var i Migration
+		var i ListMigrationsRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.DatabaseID,
-			&i.Title,
-			&i.Description,
-			&i.SqlText,
-			&i.Checksum,
-			&i.Status,
-			&i.Version,
-			&i.BaseVersion,
-			&i.Revision,
-			&i.CreatedBy,
-			&i.UpdatedBy,
-			&i.AppliedBy,
-			&i.AppliedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DownSql,
-			&i.Irreversible,
-			&i.IrreversibleReason,
-			&i.BatchTable,
-			&i.BatchColumn,
-			&i.BatchSize,
-			&i.BatchSchema,
+			&i.Migration.ID,
+			&i.Migration.DatabaseID,
+			&i.Migration.Title,
+			&i.Migration.Description,
+			&i.Migration.SqlText,
+			&i.Migration.Checksum,
+			&i.Migration.Status,
+			&i.Migration.Version,
+			&i.Migration.BaseVersion,
+			&i.Migration.Revision,
+			&i.Migration.CreatedBy,
+			&i.Migration.UpdatedBy,
+			&i.Migration.AppliedBy,
+			&i.Migration.AppliedAt,
+			&i.Migration.CreatedAt,
+			&i.Migration.UpdatedAt,
+			&i.Migration.DownSql,
+			&i.Migration.Irreversible,
+			&i.Migration.IrreversibleReason,
+			&i.Migration.BatchTable,
+			&i.Migration.BatchColumn,
+			&i.Migration.BatchSize,
+			&i.Migration.BatchSchema,
+			&i.CreatedByName,
+			&i.SqlLocked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRequestApprovals = `-- name: ListRequestApprovals :many
+SELECT g.id AS group_id, g.name AS group_name, g.leader_user_id,
+       COALESCE(l.username::text, '')::text AS leader_name,
+       a.approved,
+       COALESCE(a.comment, '')::text AS comment,
+       COALESCE(d.username::text, '')::text AS decided_by_name,
+       a.decided_at
+FROM group_database_grants gr
+         JOIN groups g ON g.id = gr.group_id
+         LEFT JOIN users l ON l.id = g.leader_user_id
+         LEFT JOIN migration_approvals a ON a.group_id = g.id AND a.request_id = $1
+         LEFT JOIN users d ON d.id = a.decided_by
+WHERE gr.database_id = $2
+ORDER BY g.name
+`
+
+type ListRequestApprovalsParams struct {
+	RequestID  int64
+	DatabaseID int64
+}
+
+type ListRequestApprovalsRow struct {
+	GroupID       int64
+	GroupName     string
+	LeaderUserID  pgtype.Int8
+	LeaderName    string
+	Approved      pgtype.Bool
+	Comment       string
+	DecidedByName string
+	DecidedAt     pgtype.Timestamptz
+}
+
+func (q *Queries) ListRequestApprovals(ctx context.Context, arg ListRequestApprovalsParams) ([]ListRequestApprovalsRow, error) {
+	rows, err := q.db.Query(ctx, listRequestApprovals, arg.RequestID, arg.DatabaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRequestApprovalsRow
+	for rows.Next() {
+		var i ListRequestApprovalsRow
+		if err := rows.Scan(
+			&i.GroupID,
+			&i.GroupName,
+			&i.LeaderUserID,
+			&i.LeaderName,
+			&i.Approved,
+			&i.Comment,
+			&i.DecidedByName,
+			&i.DecidedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -482,33 +616,17 @@ func (q *Queries) ListMigrations(ctx context.Context, arg ListMigrationsParams) 
 }
 
 const listRunningMigrationRuns = `-- name: ListRunningMigrationRuns :many
-SELECT r.id, r.migration_id, r.database_id, r.sql_text, r.checksum, r.executed_by, r.status, r.started_at,
-       r.finished_at, r.error_code, r.error_message, r.failed_statement_index,
-       m.title, m.version, u.username AS executed_by_name
-FROM migration_runs r
-         JOIN migrations m ON m.id = r.migration_id
-         JOIN users u ON u.id = r.executed_by
-WHERE r.status = 'running'
-  AND r.job_id IS NULL
-ORDER BY r.id
+SELECT id, migration_id, database_id, executed_by
+FROM migration_runs
+WHERE status = 'running' AND job_id IS NULL
+ORDER BY id
 `
 
 type ListRunningMigrationRunsRow struct {
-	ID                   int64
-	MigrationID          int64
-	DatabaseID           int64
-	SqlText              string
-	Checksum             []byte
-	ExecutedBy           int64
-	Status               RunStatus
-	StartedAt            pgtype.Timestamptz
-	FinishedAt           pgtype.Timestamptz
-	ErrorCode            pgtype.Text
-	ErrorMessage         pgtype.Text
-	FailedStatementIndex pgtype.Int4
-	Title                string
-	Version              pgtype.Int4
-	ExecutedByName       string
+	ID          int64
+	MigrationID int64
+	DatabaseID  int64
+	ExecutedBy  int64
 }
 
 func (q *Queries) ListRunningMigrationRuns(ctx context.Context) ([]ListRunningMigrationRunsRow, error) {
@@ -524,18 +642,7 @@ func (q *Queries) ListRunningMigrationRuns(ctx context.Context) ([]ListRunningMi
 			&i.ID,
 			&i.MigrationID,
 			&i.DatabaseID,
-			&i.SqlText,
-			&i.Checksum,
 			&i.ExecutedBy,
-			&i.Status,
-			&i.StartedAt,
-			&i.FinishedAt,
-			&i.ErrorCode,
-			&i.ErrorMessage,
-			&i.FailedStatementIndex,
-			&i.Title,
-			&i.Version,
-			&i.ExecutedByName,
 		); err != nil {
 			return nil, err
 		}
@@ -545,6 +652,102 @@ func (q *Queries) ListRunningMigrationRuns(ctx context.Context) ([]ListRunningMi
 		return nil, err
 	}
 	return items, nil
+}
+
+const listSucceededRuns = `-- name: ListSucceededRuns :many
+SELECT id, migration_id, kind
+FROM migration_runs
+WHERE database_id = $1 AND status = 'succeeded'
+ORDER BY id
+`
+
+type ListSucceededRunsRow struct {
+	ID          int64
+	MigrationID int64
+	Kind        RequestKind
+}
+
+func (q *Queries) ListSucceededRuns(ctx context.Context, databaseID int64) ([]ListSucceededRunsRow, error) {
+	rows, err := q.db.Query(ctx, listSucceededRuns, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSucceededRunsRow
+	for rows.Next() {
+		var i ListSucceededRunsRow
+		if err := rows.Scan(&i.ID, &i.MigrationID, &i.Kind); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockMigration = `-- name: LockMigration :one
+SELECT id FROM migrations WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockMigration(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, lockMigration, id)
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockMigrationRequest = `-- name: LockMigrationRequest :one
+SELECT id, migration_id, database_id, kind, revision, status, requested_by, created_at, updated_at FROM migration_requests WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockMigrationRequest(ctx context.Context, id int64) (MigrationRequest, error) {
+	row := q.db.QueryRow(ctx, lockMigrationRequest, id)
+	var i MigrationRequest
+	err := row.Scan(
+		&i.ID,
+		&i.MigrationID,
+		&i.DatabaseID,
+		&i.Kind,
+		&i.Revision,
+		&i.Status,
+		&i.RequestedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockRun = `-- name: LockRun :one
+SELECT id, migration_id, database_id, sql_text, checksum, executed_by, status, started_at, finished_at, error_code, error_message, failed_statement_index, request_id, job_id, kind, revision, attempt, reverts_run_id, version, checkpoint_run_id FROM migration_runs WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockRun(ctx context.Context, id int64) (MigrationRun, error) {
+	row := q.db.QueryRow(ctx, lockRun, id)
+	var i MigrationRun
+	err := row.Scan(
+		&i.ID,
+		&i.MigrationID,
+		&i.DatabaseID,
+		&i.SqlText,
+		&i.Checksum,
+		&i.ExecutedBy,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.ErrorCode,
+		&i.ErrorMessage,
+		&i.FailedStatementIndex,
+		&i.RequestID,
+		&i.JobID,
+		&i.Kind,
+		&i.Revision,
+		&i.Attempt,
+		&i.RevertsRunID,
+		&i.Version,
+		&i.CheckpointRunID,
+	)
+	return i, err
 }
 
 const markMigrationApplied = `-- name: MarkMigrationApplied :exec
@@ -568,6 +771,19 @@ func (q *Queries) MarkMigrationApplied(ctx context.Context, arg MarkMigrationApp
 	return err
 }
 
+const markMigrationRolledBack = `-- name: MarkMigrationRolledBack :exec
+UPDATE migrations
+SET status     = 'rolled_back',
+    version    = NULL,
+    updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) MarkMigrationRolledBack(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markMigrationRolledBack, id)
+	return err
+}
+
 const migrationHead = `-- name: MigrationHead :one
 SELECT COALESCE(MAX(version), 0)::int AS head
 FROM migrations
@@ -581,93 +797,70 @@ func (q *Queries) MigrationHead(ctx context.Context, databaseID int64) (int32, e
 	return head, err
 }
 
-const startMigrationRun = `-- name: StartMigrationRun :one
-INSERT INTO migration_runs (migration_id, database_id, sql_text, checksum, executed_by, status)
-VALUES ($1, $2, $3, $4, $5, 'running')
-RETURNING id
+const setMigrationRequestStatus = `-- name: SetMigrationRequestStatus :exec
+UPDATE migration_requests SET status = $1, updated_at = now() WHERE id = $2
 `
 
-type StartMigrationRunParams struct {
-	MigrationID int64
-	DatabaseID  int64
-	SqlText     string
-	Checksum    []byte
-	ExecutedBy  int64
+type SetMigrationRequestStatusParams struct {
+	Status RequestStatus
+	ID     int64
 }
 
-func (q *Queries) StartMigrationRun(ctx context.Context, arg StartMigrationRunParams) (int64, error) {
-	row := q.db.QueryRow(ctx, startMigrationRun,
-		arg.MigrationID,
-		arg.DatabaseID,
-		arg.SqlText,
-		arg.Checksum,
-		arg.ExecutedBy,
-	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+func (q *Queries) SetMigrationRequestStatus(ctx context.Context, arg SetMigrationRequestStatusParams) error {
+	_, err := q.db.Exec(ctx, setMigrationRequestStatus, arg.Status, arg.ID)
+	return err
 }
 
-const updateMigrationDraft = `-- name: UpdateMigrationDraft :one
+const updateMigration = `-- name: UpdateMigration :exec
 UPDATE migrations
-SET title       = $1,
-    description = $2,
-    sql_text    = $3,
-    checksum    = $4,
-    updated_by  = $5,
-    revision    = revision + 1,
-    updated_at  = now()
-WHERE id = $6 AND database_id = $7 AND status = 'draft' AND revision = $8
-RETURNING id, database_id, title, description, sql_text, checksum, status, version, base_version, revision, created_by, updated_by, applied_by, applied_at, created_at, updated_at, down_sql, irreversible, irreversible_reason, batch_table, batch_column, batch_size, batch_schema
+SET title               = $1,
+    description         = $2,
+    sql_text            = $3,
+    down_sql            = $4,
+    checksum            = $5,
+    irreversible        = $6,
+    irreversible_reason = $7,
+    batch_schema        = $8,
+    batch_table         = $9,
+    batch_column        = $10,
+    batch_size          = $11,
+    updated_by          = $12,
+    revision            = revision + 1,
+    updated_at          = now()
+WHERE id = $13
 `
 
-type UpdateMigrationDraftParams struct {
-	Title       string
-	Description string
-	SqlText     string
-	Checksum    []byte
-	Actor       int64
-	ID          int64
-	DatabaseID  int64
-	Revision    int32
+type UpdateMigrationParams struct {
+	Title              string
+	Description        string
+	SqlText            string
+	DownSql            pgtype.Text
+	Checksum           []byte
+	Irreversible       bool
+	IrreversibleReason string
+	BatchSchema        pgtype.Text
+	BatchTable         pgtype.Text
+	BatchColumn        pgtype.Text
+	BatchSize          pgtype.Int4
+	Actor              int64
+	ID                 int64
 }
 
-func (q *Queries) UpdateMigrationDraft(ctx context.Context, arg UpdateMigrationDraftParams) (Migration, error) {
-	row := q.db.QueryRow(ctx, updateMigrationDraft,
+func (q *Queries) UpdateMigration(ctx context.Context, arg UpdateMigrationParams) error {
+	_, err := q.db.Exec(ctx, updateMigration,
 		arg.Title,
 		arg.Description,
 		arg.SqlText,
+		arg.DownSql,
 		arg.Checksum,
+		arg.Irreversible,
+		arg.IrreversibleReason,
+		arg.BatchSchema,
+		arg.BatchTable,
+		arg.BatchColumn,
+		arg.BatchSize,
 		arg.Actor,
 		arg.ID,
-		arg.DatabaseID,
-		arg.Revision,
 	)
-	var i Migration
-	err := row.Scan(
-		&i.ID,
-		&i.DatabaseID,
-		&i.Title,
-		&i.Description,
-		&i.SqlText,
-		&i.Checksum,
-		&i.Status,
-		&i.Version,
-		&i.BaseVersion,
-		&i.Revision,
-		&i.CreatedBy,
-		&i.UpdatedBy,
-		&i.AppliedBy,
-		&i.AppliedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.DownSql,
-		&i.Irreversible,
-		&i.IrreversibleReason,
-		&i.BatchTable,
-		&i.BatchColumn,
-		&i.BatchSize,
-		&i.BatchSchema,
-	)
-	return i, err
+	return err
 }

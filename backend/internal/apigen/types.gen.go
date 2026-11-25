@@ -58,7 +58,6 @@ const (
 	View  ExplorerTableSummaryKind = "view"
 )
 
-<<<<<<< HEAD
 // Defines values for JobKind.
 const (
 	JobKindApply    JobKind = "apply"
@@ -75,8 +74,17 @@ const (
 	JobStatusSucceeded JobStatus = "succeeded"
 )
 
-=======
->>>>>>> ba172295f318908c865e005828b8869c08f90f04
+// Defines values for MigrationAction.
+const (
+	MigrationActionDelete   MigrationAction = "delete"
+	MigrationActionEdit     MigrationAction = "edit"
+	MigrationActionExecute  MigrationAction = "execute"
+	MigrationActionExplain  MigrationAction = "explain"
+	MigrationActionForward  MigrationAction = "forward"
+	MigrationActionRollback MigrationAction = "rollback"
+	MigrationActionSubmit   MigrationAction = "submit"
+)
+
 // Defines values for MigrationApprovalDecision.
 const (
 	MigrationApprovalDecisionApproved MigrationApprovalDecision = "approved"
@@ -92,16 +100,23 @@ const (
 
 // Defines values for MigrationExecutionStatus.
 const (
-	Failed  MigrationExecutionStatus = "failed"
-	Running MigrationExecutionStatus = "running"
-	Success MigrationExecutionStatus = "success"
+	Failed    MigrationExecutionStatus = "failed"
+	Running   MigrationExecutionStatus = "running"
+	Succeeded MigrationExecutionStatus = "succeeded"
 )
 
 // Defines values for MigrationKind.
 const (
-	MigrationKindApply    MigrationKind = "apply"
-	MigrationKindForward  MigrationKind = "forward"
-	MigrationKindRollback MigrationKind = "rollback"
+	Apply    MigrationKind = "apply"
+	Forward  MigrationKind = "forward"
+	Rollback MigrationKind = "rollback"
+)
+
+// Defines values for MigrationPosition.
+const (
+	Applied    MigrationPosition = "applied"
+	Draft      MigrationPosition = "draft"
+	RolledBack MigrationPosition = "rolled_back"
 )
 
 // Defines values for MigrationStatus.
@@ -109,10 +124,12 @@ const (
 	MigrationStatusApproved      MigrationStatus = "approved"
 	MigrationStatusDraft         MigrationStatus = "draft"
 	MigrationStatusFailed        MigrationStatus = "failed"
-	MigrationStatusPendingQueue  MigrationStatus = "pending_queue"
+	MigrationStatusPartial       MigrationStatus = "partial"
 	MigrationStatusPendingReview MigrationStatus = "pending_review"
+	MigrationStatusQueued        MigrationStatus = "queued"
+	MigrationStatusRejected      MigrationStatus = "rejected"
 	MigrationStatusRunning       MigrationStatus = "running"
-	MigrationStatusSuccess       MigrationStatus = "success"
+	MigrationStatusSucceeded     MigrationStatus = "succeeded"
 )
 
 // Defines values for ProblemCode.
@@ -477,66 +494,82 @@ type LoginRequest struct {
 
 // Migration defines model for Migration.
 type Migration struct {
-	Batch              *MigrationBatch `json:"batch,omitempty"`
-	CreatedAt          time.Time       `json:"createdAt"`
-	CreatedBy          int64           `json:"createdBy"`
-	DatabaseId         int64           `json:"databaseId"`
-	Description        string          `json:"description"`
-	DownSql            *string         `json:"downSql,omitempty"`
-	Id                 int64           `json:"id"`
-	Irreversible       bool            `json:"irreversible"`
-	IrreversibleReason *string         `json:"irreversibleReason,omitempty"`
-	Revision           int             `json:"revision"`
-	Seq                int             `json:"seq"`
+	// Actions Aksi yang saat ini sah untuk pengguna ini
+	Actions       []MigrationAction `json:"actions"`
+	Batch         *MigrationBatch   `json:"batch,omitempty"`
+	CreatedAt     time.Time         `json:"createdAt"`
+	CreatedByName string            `json:"createdByName"`
+	DatabaseId    int64             `json:"databaseId"`
+	Description   string            `json:"description"`
+	DownSql       string            `json:"downSql"`
 
-	// SqlLocked true setelah pernah dieksekusi; SQL tidak bisa diubah
-	SqlLocked bool            `json:"sqlLocked"`
+	// ExecutableRequestId Request yang dijalankan oleh aksi execute
+	ExecutableRequestId *int64 `json:"executableRequestId,omitempty"`
+	Id                  int64  `json:"id"`
+	Irreversible        bool   `json:"irreversible"`
+	IrreversibleReason  string `json:"irreversibleReason"`
+
+	// JobId Job dari request terakhir yang tidak ditolak
+	JobId *int64 `json:"jobId,omitempty"`
+
+	// Position Posisi migration di riwayat linear database.
+	Position MigrationPosition `json:"position"`
+	Request  *MigrationRequest `json:"request,omitempty"`
+	Revision int               `json:"revision"`
+
+	// SqlLocked true setelah pernah dieksekusi
+	SqlLocked bool `json:"sqlLocked"`
+
+	// Status Status workflow dari request terakhir. draft berarti belum ada request untuk revisi ini.
 	Status    MigrationStatus `json:"status"`
 	Title     string          `json:"title"`
 	UpSql     string          `json:"upSql"`
 	UpdatedAt time.Time       `json:"updatedAt"`
-	UpdatedBy int64           `json:"updatedBy"`
+
+	// Version Versi database setelah migration ini
+	Version *int `json:"version,omitempty"`
 }
+
+// MigrationAction defines model for MigrationAction.
+type MigrationAction string
 
 // MigrationApproval defines model for MigrationApproval.
 type MigrationApproval struct {
-	Comment     string                    `json:"comment"`
-	DecidedAt   *time.Time                `json:"decidedAt"`
-	Decision    MigrationApprovalDecision `json:"decision"`
-	GroupId     int64                     `json:"groupId"`
-	Kind        MigrationKind             `json:"kind"`
-	LeaderId    int64                     `json:"leaderId"`
-	MigrationId int64                     `json:"migrationId"`
-	Revision    int                       `json:"revision"`
+	Comment       string                    `json:"comment"`
+	DecidedAt     *time.Time                `json:"decidedAt,omitempty"`
+	DecidedByName *string                   `json:"decidedByName,omitempty"`
+	Decision      MigrationApprovalDecision `json:"decision"`
+	GroupId       int64                     `json:"groupId"`
+	GroupName     string                    `json:"groupName"`
+
+	// LeaderName Kosong jika group belum punya leader
+	LeaderName *string `json:"leaderName,omitempty"`
 }
 
-// MigrationApprovalDecision defines model for MigrationApproval.Decision.
+// MigrationApprovalDecision defines model for MigrationApprovalDecision.
 type MigrationApprovalDecision string
 
 // MigrationApprovals defines model for MigrationApprovals.
 type MigrationApprovals struct {
-	Approvals []MigrationApproval `json:"approvals"`
-	Required  []MigrationApprover `json:"required"`
-}
-
-// MigrationApprover defines model for MigrationApprover.
-type MigrationApprover struct {
-	GroupId  int64  `json:"groupId"`
-	LeaderId int64  `json:"leaderId"`
-	Name     string `json:"name"`
+	CanDecide bool                `json:"canDecide"`
+	Groups    []MigrationApproval `json:"groups"`
+	Request   MigrationRequest    `json:"request"`
 }
 
 // MigrationBatch defines model for MigrationBatch.
 type MigrationBatch struct {
+	// Column Kolom integer unik yang tidak berubah
 	Column string `json:"column"`
+	Schema string `json:"schema"`
 	Size   int    `json:"size"`
+	Table  string `json:"table"`
 }
 
 // MigrationDecision defines model for MigrationDecision.
 type MigrationDecision struct {
-	Comment  *string                   `json:"comment,omitempty"`
-	Decision MigrationDecisionDecision `json:"decision"`
-	Kind     MigrationKind             `json:"kind"`
+	Comment   *string                   `json:"comment,omitempty"`
+	Decision  MigrationDecisionDecision `json:"decision"`
+	RequestId int64                     `json:"requestId"`
 }
 
 // MigrationDecisionDecision defines model for MigrationDecision.Decision.
@@ -547,42 +580,105 @@ type MigrationDefinition struct {
 	Batch       *MigrationBatch `json:"batch,omitempty"`
 	Description *string         `json:"description,omitempty"`
 
-	// DownSql Kosong bila irreversible
+	// DownSql Kosong jika irreversible
 	DownSql      string `json:"downSql"`
 	Irreversible bool   `json:"irreversible"`
 
-	// IrreversibleReason Wajib bila irreversible
+	// IrreversibleReason Wajib jika irreversible
 	IrreversibleReason string `json:"irreversibleReason"`
 	Title              string `json:"title"`
 	UpSql              string `json:"upSql"`
 }
 
+// MigrationExecute defines model for MigrationExecute.
+type MigrationExecute struct {
+	RequestId int64 `json:"requestId"`
+}
+
 // MigrationExecution defines model for MigrationExecution.
 type MigrationExecution struct {
-	ErrorMessage string `json:"errorMessage"`
-	ExecutedSql  string `json:"executedSql"`
+	Attempt int `json:"attempt"`
 
-	// FinishedAt Nilai nol (0001-01-01) selama masih running
-	FinishedAt         time.Time                `json:"finishedAt"`
+	// ErrorCode SQLSTATE jika ada
+	ErrorCode          *string                  `json:"errorCode,omitempty"`
+	ErrorMessage       *string                  `json:"errorMessage,omitempty"`
+	ExecutedBy         int64                    `json:"executedBy"`
+	ExecutedByName     string                   `json:"executedByName"`
+	ExecutedSql        string                   `json:"executedSql"`
+	FinishedAt         *time.Time               `json:"finishedAt,omitempty"`
 	Id                 int64                    `json:"id"`
+	JobId              *int64                   `json:"jobId,omitempty"`
 	Kind               MigrationKind            `json:"kind"`
 	MigrationId        int64                    `json:"migrationId"`
-	RevertsExecutionId *int64                   `json:"revertsExecutionId"`
+	MigrationTitle     string                   `json:"migrationTitle"`
+	RevertsExecutionId *int64                   `json:"revertsExecutionId,omitempty"`
 	Revision           int                      `json:"revision"`
-	SqlState           string                   `json:"sqlState"`
 	StartedAt          time.Time                `json:"startedAt"`
 	Status             MigrationExecutionStatus `json:"status"`
-	UserId             int64                    `json:"userId"`
+	Version            *int                     `json:"version,omitempty"`
 }
 
 // MigrationExecutionStatus defines model for MigrationExecution.Status.
 type MigrationExecutionStatus string
 
+// MigrationExplain defines model for MigrationExplain.
+type MigrationExplain struct {
+	Analyze bool `json:"analyze"`
+}
+
+// MigrationJob defines model for MigrationJob.
+type MigrationJob struct {
+	JobId int64 `json:"jobId"`
+}
+
 // MigrationKind defines model for MigrationKind.
 type MigrationKind string
 
-// MigrationStatus defines model for MigrationStatus.
+// MigrationPlan defines model for MigrationPlan.
+type MigrationPlan struct {
+	Explainable bool         `json:"explainable"`
+	Index       int          `json:"index"`
+	Notice      *string      `json:"notice,omitempty"`
+	Plan        *interface{} `json:"plan,omitempty"`
+	Sql         string       `json:"sql"`
+}
+
+// MigrationPosition Posisi migration di riwayat linear database.
+type MigrationPosition string
+
+// MigrationRequest defines model for MigrationRequest.
+type MigrationRequest struct {
+	CreatedAt       time.Time     `json:"createdAt"`
+	Id              int64         `json:"id"`
+	JobId           *int64        `json:"jobId,omitempty"`
+	Kind            MigrationKind `json:"kind"`
+	RequestedByName string        `json:"requestedByName"`
+	Revision        int           `json:"revision"`
+
+	// Status Status workflow dari request terakhir. draft berarti belum ada request untuk revisi ini.
+	Status MigrationStatus `json:"status"`
+}
+
+// MigrationStatus Status workflow dari request terakhir. draft berarti belum ada request untuk revisi ini.
 type MigrationStatus string
+
+// MigrationUpdate defines model for MigrationUpdate.
+type MigrationUpdate struct {
+	Batch       *MigrationBatch `json:"batch,omitempty"`
+	Description *string         `json:"description,omitempty"`
+
+	// DownSql Kosong jika irreversible
+	DownSql      string `json:"downSql"`
+	Irreversible bool   `json:"irreversible"`
+
+	// IrreversibleReason Wajib jika irreversible
+	IrreversibleReason string `json:"irreversibleReason"`
+
+	// Revision Revisi yang dibaca pengguna sebelum mengubah
+	Revision int    `json:"revision"`
+	Title    string `json:"title"`
+	UpSql    string `json:"upSql"`
+}
 
 // PasswordReset defines model for PasswordReset.
 type PasswordReset struct {
@@ -770,7 +866,7 @@ type GetApiAdminUsersParams struct {
 
 // GetApiDatabasesDatabaseIdMigrationHistoryParams defines parameters for GetApiDatabasesDatabaseIdMigrationHistory.
 type GetApiDatabasesDatabaseIdMigrationHistoryParams struct {
-	// HideRollback Sembunyikan pasangan (execution yang dibatalkan, rollback sukses). Attempt gagal tetap tampil.
+	// HideRollback Sembunyikan pasangan eksekusi yang dibatalkan dan rollback sukses yang membatalkannya. Attempt gagal tetap tampil.
 	HideRollback *bool  `form:"hideRollback,omitempty" json:"hideRollback,omitempty"`
 	MigrationId  *int64 `form:"migrationId,omitempty" json:"migrationId,omitempty"`
 }
@@ -779,11 +875,6 @@ type GetApiDatabasesDatabaseIdMigrationHistoryParams struct {
 type GetApiDatabasesDatabaseIdSchemasSchemaNameTablesTableNameRowsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
-}
-
-// GetApiMigrationsMigrationIdApprovalsParams defines parameters for GetApiMigrationsMigrationIdApprovals.
-type GetApiMigrationsMigrationIdApprovalsParams struct {
-	Kind *MigrationKind `form:"kind,omitempty" json:"kind,omitempty"`
 }
 
 // PostApiAdminDatabasesJSONRequestBody defines body for PostApiAdminDatabases for application/json ContentType.
@@ -826,10 +917,16 @@ type PostApiDatabasesDatabaseIdMigrationsJSONRequestBody = MigrationDefinition
 type PostApiDatabasesDatabaseIdSchemaDiffJSONRequestBody = SchemaDiffRequest
 
 // PutApiMigrationsMigrationIdJSONRequestBody defines body for PutApiMigrationsMigrationId for application/json ContentType.
-type PutApiMigrationsMigrationIdJSONRequestBody = MigrationDefinition
+type PutApiMigrationsMigrationIdJSONRequestBody = MigrationUpdate
 
 // PostApiMigrationsMigrationIdApprovalsJSONRequestBody defines body for PostApiMigrationsMigrationIdApprovals for application/json ContentType.
 type PostApiMigrationsMigrationIdApprovalsJSONRequestBody = MigrationDecision
+
+// PostApiMigrationsMigrationIdExecuteJSONRequestBody defines body for PostApiMigrationsMigrationIdExecute for application/json ContentType.
+type PostApiMigrationsMigrationIdExecuteJSONRequestBody = MigrationExecute
+
+// PostApiMigrationsMigrationIdExplainJSONRequestBody defines body for PostApiMigrationsMigrationIdExplain for application/json ContentType.
+type PostApiMigrationsMigrationIdExplainJSONRequestBody = MigrationExplain
 
 // AsDatabaseConnectionCreate returns the union data inside the DatabaseConnectionTestRequest as a DatabaseConnectionCreate
 func (t DatabaseConnectionTestRequest) AsDatabaseConnectionCreate() (DatabaseConnectionCreate, error) {

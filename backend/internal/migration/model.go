@@ -1,186 +1,181 @@
 package migration
 
-import "time"
+import (
+	"context"
+	"strconv"
+	"time"
 
-// Status adalah status workflow migration (M2) sekaligus status satu attempt
-// eksekusi (hanya running/success/failed yang dipakai di Execution).
-type Status string
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
-const (
-	StatusDraft         Status = "draft"
-	StatusPendingReview Status = "pending_review"
-	StatusApproved      Status = "approved"
-	StatusPendingQueue  Status = "pending_queue"
-	StatusRunning       Status = "running"
-	StatusSuccess       Status = "success"
-	StatusFailed        Status = "failed"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apigen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 )
 
-func (s Status) IsTerminal() bool { return s == StatusSuccess || s == StatusFailed }
+type Target interface {
+	Explain(ctx context.Context, sql string, analyze bool) (*dbms.ExplainResult, error)
+	CommittedRun(ctx context.Context, runID int64) (version int, found bool, err error)
+}
 
-func (s Status) IsValid() bool {
-	switch s {
-	case StatusDraft, StatusPendingReview, StatusApproved,
-		StatusPendingQueue, StatusRunning, StatusSuccess, StatusFailed:
+type TargetRegistry interface {
+	Get(ctx context.Context, databaseID int64) (Target, error)
+}
+
+type Service struct {
+	Pool    *pgxpool.Pool
+	Targets TargetRegistry
+	Auth    authz.Authorizer
+	Audit   *audit.Logger
+}
+
+type request struct {
+	ID              int64
+	MigrationID     int64
+	Kind            gen.RequestKind
+	Status          gen.RequestStatus
+	Revision        int32
+	RequestedByName string
+	CreatedAt       time.Time
+	JobID           *int64
+	JobFailed       bool
+}
+
+func (r request) effective() gen.RequestStatus {
+	if r.JobFailed && (r.Status == gen.RequestStatusQueued || r.Status == gen.RequestStatusRunning) {
+		return gen.RequestStatusFailed
+	}
+	return r.Status
+}
+
+func (r request) open() bool {
+	switch r.effective() {
+	case gen.RequestStatusPendingReview, gen.RequestStatusApproved, gen.RequestStatusQueued, gen.RequestStatusRunning:
 		return true
 	}
 	return false
 }
 
-// Kind adalah jenis eksekusi.
-type Kind string
+func (r request) up() bool { return r.Kind != gen.RequestKindRollback }
 
-const (
-	KindApply    Kind = "apply"
-	KindRollback Kind = "rollback"
-	KindForward  Kind = "forward"
-)
-
-func (k Kind) IsValid() bool {
-	switch k {
-	case KindApply, KindRollback, KindForward:
-		return true
+func (r request) dto() apigen.MigrationRequest {
+	return apigen.MigrationRequest{
+		Id:              r.ID,
+		Kind:            apigen.MigrationKind(r.Kind),
+		Status:          apigen.MigrationStatus(r.effective()),
+		Revision:        int(r.Revision),
+		RequestedByName: r.RequestedByName,
+		CreatedAt:       r.CreatedAt,
+		JobId:           r.JobID,
 	}
-	return false
 }
 
-// BatchConfig: nil pada Migration/Definition berarti mode biasa.
-type BatchConfig struct {
-	Column string `json:"column"`
-	Size   int    `json:"size"`
-}
-
-func (b *BatchConfig) IsValid() bool {
-	if b == nil {
-		return true
+func toMigration(row gen.GetMigrationRow, st state, level authz.Level) apigen.Migration {
+	m := row.Migration
+	out := apigen.Migration{
+		Id:                 m.ID,
+		DatabaseId:         m.DatabaseID,
+		Title:              m.Title,
+		Description:        m.Description,
+		Status:             st.status(m),
+		Position:           apigen.MigrationPosition(m.Status),
+		Version:            intPtr(m.Version),
+		Revision:           int(m.Revision),
+		UpSql:              m.SqlText,
+		DownSql:            m.DownSql.String,
+		Irreversible:       m.Irreversible,
+		IrreversibleReason: m.IrreversibleReason,
+		Batch:              batchOf(m),
+		SqlLocked:          row.SqlLocked,
+		CreatedByName:      row.CreatedByName,
+		CreatedAt:          m.CreatedAt.Time.UTC(),
+		UpdatedAt:          m.UpdatedAt.Time.UTC(),
+		Actions:            st.actions(m, row.SqlLocked, level),
 	}
-	return b.Column != "" && b.Size > 0
-}
-
-// Definition adalah input pembuatan/perubahan draft (R-1). Satu-satunya tipe
-// input untuk Create dan UpdateDraft.
-type Definition struct {
-	Title              string       `json:"title"`
-	Description        string       `json:"description"`
-	UpSQL              string       `json:"upSql"`
-	DownSQL            string       `json:"downSql"`
-	Irreversible       bool         `json:"irreversible"`
-	IrreversibleReason string       `json:"irreversibleReason"`
-	Batch              *BatchConfig `json:"batch,omitempty"`
-}
-
-// Migration adalah satu-satunya representasi migration. Kolom M2 ada di
-// bagian atas; field di bagian "legacy M1" hanya diisi oleh PGRepository
-// (repository.go) dan dipakai Reconciler.
-type Migration struct {
-	ID          int64  `json:"id"`
-	DatabaseID  int64  `json:"databaseId"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Status      Status `json:"status"`
-	Revision    int    `json:"revision"`
-	// Seq adalah urutan linear per database (1, 2, 3, ...), diberikan Store
-	// saat dibuat. Dipakai rules.go untuk urutan apply/rollback/forward.
-	// Berbeda dari Version (legacy) yang baru terisi setelah apply.
-	Seq                int          `json:"seq"`
-	UpSQL              string       `json:"upSql"`
-	DownSQL            *string      `json:"downSql,omitempty"` // nil jika irreversible
-	Irreversible       bool         `json:"irreversible"`
-	IrreversibleReason string       `json:"irreversibleReason,omitempty"`
-	Batch              *BatchConfig `json:"batch,omitempty"`
-	SQLLocked          bool         `json:"sqlLocked"` // true setelah pernah dieksekusi
-	CreatedBy          int64        `json:"createdBy"`
-	UpdatedBy          int64        `json:"updatedBy"`
-	CreatedAt          time.Time    `json:"createdAt"`
-	UpdatedAt          time.Time    `json:"updatedAt"`
-
-	// --- legacy M1 (jangan dipakai kode M2) ---
-	SQL         string     `json:"sql"`
-	Checksum    string     `json:"checksum"`
-	Version     *int       `json:"version,omitempty"`
-	BaseVersion int        `json:"baseVersion"`
-	AppliedBy   *int64     `json:"appliedBy,omitempty"`
-	AppliedAt   *time.Time `json:"appliedAt,omitempty"`
-}
-
-// Execution adalah satu baris riwayat per attempt (R-4). Tidak pernah dihapus;
-// hanya boleh difinalisasi satu kali (running -> success/failed).
-type Execution struct {
-	ID                 int64     `json:"id"`
-	MigrationID        int64     `json:"migrationId"`
-	Revision           int       `json:"revision"`
-	UserID             int64     `json:"userId"`
-	Kind               Kind      `json:"kind"`
-	Status             Status    `json:"status"`             // running/success/failed
-	ExecutedSQL        string    `json:"executedSql"`        // salinan SQL yang benar-benar dijalankan
-	RevertsExecutionID *int64    `json:"revertsExecutionId"` // diisi pada rollback: execution yang dibatalkan
-	ErrorMsg           string    `json:"errorMessage"`
-	SQLState           string    `json:"sqlState"`
-	StartedAt          time.Time `json:"startedAt"`
-	FinishedAt         time.Time `json:"finishedAt"` // zero selama masih running
-}
-
-// ExecutionResult dilaporkan worker saat attempt selesai.
-type ExecutionResult struct {
-	Success     bool
-	ExecutedSQL string
-	ErrorMsg    string
-	SQLState    string
-}
-
-// ExecutionRequest dikirim ke publish job (kontrak Migu).
-type ExecutionRequest struct {
-	MigrationID int64
-	ExecutionID int64 // 0 sampai worker membuat attempt
-	RequestedBy int64
-	Kind        Kind
-}
-
-// Approver adalah leader group yang wajib menyetujui.
-type Approver struct {
-	GroupID  int64  `json:"groupId"`
-	LeaderID int64  `json:"leaderId"`
-	Name     string `json:"name"` // opsional, untuk UI
-}
-
-type ApprovalDecision string
-
-const (
-	ApprovalPending  ApprovalDecision = "pending"
-	ApprovalApproved ApprovalDecision = "approved"
-	ApprovalRejected ApprovalDecision = "rejected"
-)
-
-func (d ApprovalDecision) IsValid() bool {
-	switch d {
-	case ApprovalPending, ApprovalApproved, ApprovalRejected:
-		return true
+	if latest := st.latest(m.ID); latest != nil {
+		dto := latest.dto()
+		out.Request = &dto
 	}
-	return false
+	if current := st.current(m.ID); current != nil {
+		out.JobId = current.JobID
+	}
+	if r := st.executable(m); r != nil {
+		out.ExecutableRequestId = &r.ID
+	}
+	return out
 }
 
-func (d ApprovalDecision) IsDecided() bool { return d == ApprovalApproved || d == ApprovalRejected }
-
-// Approval: satu baris per (migration, revision, kind, leader).
-type Approval struct {
-	MigrationID int64            `json:"migrationId"`
-	Revision    int              `json:"revision"`
-	GroupID     int64            `json:"groupId"`
-	LeaderID    int64            `json:"leaderId"`
-	Kind        Kind             `json:"kind"`
-	Decision    ApprovalDecision `json:"decision"`
-	Comment     string           `json:"comment"`
-	DecidedAt   *time.Time       `json:"decidedAt"`
+func batchOf(m gen.Migration) *apigen.MigrationBatch {
+	if !m.BatchTable.Valid {
+		return nil
+	}
+	return &apigen.MigrationBatch{
+		Schema: m.BatchSchema.String,
+		Table:  m.BatchTable.String,
+		Column: m.BatchColumn.String,
+		Size:   int(m.BatchSize.Int32),
+	}
 }
 
-// Actor adalah pengguna yang memanggil Service.
-type Actor struct {
-	UserID int64
+func toExecution(row gen.ListExecutionsRow) apigen.MigrationExecution {
+	r := row.MigrationRun
+	return apigen.MigrationExecution{
+		Id:                 r.ID,
+		MigrationId:        r.MigrationID,
+		MigrationTitle:     row.Title,
+		Version:            intPtr(r.Version),
+		Revision:           int(r.Revision),
+		Kind:               apigen.MigrationKind(r.Kind),
+		Status:             apigen.MigrationExecutionStatus(r.Status),
+		Attempt:            int(r.Attempt),
+		ExecutedBy:         r.ExecutedBy,
+		ExecutedByName:     row.ExecutedByName,
+		ExecutedSql:        r.SqlText,
+		RevertsExecutionId: int64Ptr(r.RevertsRunID),
+		JobId:              int64Ptr(r.JobID),
+		ErrorCode:          textPtr(r.ErrorCode),
+		ErrorMessage:       textPtr(r.ErrorMessage),
+		StartedAt:          r.StartedAt.Time.UTC(),
+		FinishedAt:         timePtr(r.FinishedAt),
+	}
 }
 
-// HistoryFilter dipakai ListHistory dan Store.ListExecutions. Store hanya
-// memakai MigrationID; HideRollback diterapkan Service (HideRollbackPairs).
-type HistoryFilter struct {
-	HideRollback bool
-	MigrationID  *int64
+func intPtr(v pgtype.Int4) *int {
+	if !v.Valid {
+		return nil
+	}
+	n := int(v.Int32)
+	return &n
 }
+
+func int64Ptr(v pgtype.Int8) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+
+func textPtr(v pgtype.Text) *string {
+	if !v.Valid {
+		return nil
+	}
+	return &v.String
+}
+
+func timePtr(v pgtype.Timestamptz) *time.Time {
+	if !v.Valid {
+		return nil
+	}
+	t := v.Time.UTC()
+	return &t
+}
+
+func text(s string) pgtype.Text { return pgtype.Text{String: s, Valid: s != ""} }
+
+func int8of(n int64) pgtype.Int8 { return pgtype.Int8{Int64: n, Valid: true} }
+
+func int4of(n int32) pgtype.Int4 { return pgtype.Int4{Int32: n, Valid: true} }
+
+func formatID(id int64) string { return strconv.FormatInt(id, 10) }

@@ -1,120 +1,93 @@
 package migration
 
 import (
+	"crypto/sha256"
 	"fmt"
 	"strings"
+
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apigen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqlsplit"
 )
 
-// Batas ukuran batch. Catatan: README Edo memakai batch sampai 200.000;
-// naikkan MaxBatchSize bila itu ukuran yang boleh dipakai pengguna.
 const (
-	MaxBatchSize = 10000
-	MinBatchSize = 1
+	maxTitleLen      = 200
+	maxTextLen       = 2000
+	maxIdentifierLen = 63
+	maxBatchSize     = 1_000_000
 )
 
-// ValidateDefinition memeriksa up/down/irreversible/batch sebelum disimpan.
-// Title dan dialek SQL divalidasi di Service.validateDefinition.
-func ValidateDefinition(d Definition) error {
-	if strings.TrimSpace(d.UpSQL) == "" {
-		return fmt.Errorf("%w: UpSQL wajib diisi", ErrInvalidDefinition)
-	}
+func checksum(sql string) []byte { h := sha256.Sum256([]byte(sql)); return h[:] }
 
+func validateDefinition(kind string, d apigen.MigrationDefinition) error {
+	fields := map[string]string{}
+	if t := strings.TrimSpace(d.Title); t == "" || len(t) > maxTitleLen {
+		fields["title"] = fmt.Sprintf("wajib diisi, maksimal %d karakter", maxTitleLen)
+	}
+	if d.Description != nil && len(*d.Description) > maxTextLen {
+		fields["description"] = fmt.Sprintf("maksimal %d karakter", maxTextLen)
+	}
+	if msg := validateSQL(kind, d.UpSql, d.Batch != nil); msg != "" {
+		fields["upSql"] = msg
+	}
 	if d.Irreversible {
-		if strings.TrimSpace(d.DownSQL) != "" {
-			return fmt.Errorf("%w: DownSQL harus kosong ketika Irreversible=true", ErrInvalidDefinition)
+		if strings.TrimSpace(d.DownSql) != "" {
+			fields["downSql"] = "harus kosong untuk migration irreversible"
 		}
-		if strings.TrimSpace(d.IrreversibleReason) == "" {
-			return fmt.Errorf("%w: IrreversibleReason wajib diisi ketika Irreversible=true", ErrInvalidDefinition)
+		if r := strings.TrimSpace(d.IrreversibleReason); r == "" || len(r) > maxTextLen {
+			fields["irreversibleReason"] = fmt.Sprintf("wajib diisi untuk migration irreversible, maksimal %d karakter", maxTextLen)
 		}
 	} else {
-		if strings.TrimSpace(d.DownSQL) == "" {
-			return fmt.Errorf("%w: DownSQL wajib diisi ketika Irreversible=false", ErrInvalidDefinition)
+		if msg := validateSQL(kind, d.DownSql, d.Batch != nil); msg != "" {
+			fields["downSql"] = msg
 		}
 		if strings.TrimSpace(d.IrreversibleReason) != "" {
-			return fmt.Errorf("%w: IrreversibleReason harus kosong ketika Irreversible=false", ErrInvalidDefinition)
+			fields["irreversibleReason"] = "hanya untuk migration irreversible"
 		}
 	}
-
 	if d.Batch != nil {
-		if err := ValidateBatchConfig(*d.Batch); err != nil {
-			return err
+		if msg := validateBatch(kind, *d.Batch); msg != "" {
+			fields["batch"] = msg
 		}
-		if err := ValidateBatchSQL(d.UpSQL, d.DownSQL); err != nil {
-			return err
-		}
+	}
+	if len(fields) > 0 {
+		return apperr.Validation(fields)
 	}
 	return nil
 }
 
-// ValidateBatchSQL memastikan up dan down masing-masing satu statement yang
-// memakai $1 (cursor terakhir, eksklusif) dan $2 (batas batch, inklusif).
-func ValidateBatchSQL(up, down string) error {
-	if err := validateBatchStatement(up, "UpSQL"); err != nil {
-		return err
-	}
-	return validateBatchStatement(down, "DownSQL")
-}
-
-func validateBatchStatement(sql, field string) error {
+func validateSQL(kind, sql string, batch bool) string {
 	if strings.TrimSpace(sql) == "" {
-		return fmt.Errorf("%w: %s kosong", ErrInvalidBatchSQL, field)
+		return "wajib diisi"
 	}
-	stmts, params, err := scanSQL(sql)
-	if err != nil {
-		return fmt.Errorf("%w: %s gagal dibaca: %v", ErrInvalidBatchSQL, field, err)
+	stmts, err := sqlsplit.Split(sql, sqlsplit.Dialect(kind))
+	if err == nil {
+		err = sqlsplit.Validate(stmts, sqlsplit.Dialect(kind))
 	}
-	if len(stmts) != 1 {
-		return fmt.Errorf("%w: %s harus berisi tepat satu statement, ditemukan %d", ErrInvalidBatchSQL, field, len(stmts))
+	switch {
+	case err != nil:
+		return err.Error()
+	case len(stmts) == 0:
+		return "wajib diisi"
+	case batch && (len(stmts) != 1 || !strings.Contains(stmts[0].SQL, "$1") ||
+		!strings.Contains(stmts[0].SQL, "$2") || strings.Contains(stmts[0].SQL, "$3")):
+		return dbms.ErrBatchSQL.Error()
 	}
-	seen := map[int]bool{}
-	for _, p := range params {
-		if p < 1 || p > 2 {
-			return fmt.Errorf("%w: %s memakai placeholder $%d; hanya $1 dan $2 diizinkan", ErrInvalidBatchSQL, field, p)
-		}
-		seen[p] = true
-	}
-	if !seen[1] || !seen[2] {
-		return fmt.Errorf("%w: %s harus memakai $1 (cursor terakhir) dan $2 (batas batch)", ErrInvalidBatchSQL, field)
-	}
-	return nil
+	return ""
 }
 
-// ValidateBatchConfig: kolom wajib, ukuran dalam rentang.
-func ValidateBatchConfig(c BatchConfig) error {
-	if strings.TrimSpace(c.Column) == "" {
-		return fmt.Errorf("%w: Column wajib diisi", ErrInvalidBatchConfig)
+func validateBatch(kind string, b apigen.MigrationBatch) string {
+	if kind != dbms.KindPostgres {
+		return "mode batch hanya untuk PostgreSQL"
 	}
-	if !isSimpleIdentifier(c.Column) {
-		return fmt.Errorf("%w: Column %q bukan identifier yang valid", ErrInvalidBatchConfig, c.Column)
-	}
-	if c.Size < MinBatchSize {
-		return fmt.Errorf("%w: Size minimal %d, didapat %d", ErrInvalidBatchConfig, MinBatchSize, c.Size)
-	}
-	if c.Size > MaxBatchSize {
-		return fmt.Errorf("%w: Size maksimal %d, didapat %d", ErrInvalidBatchConfig, MaxBatchSize, c.Size)
-	}
-	return nil
-}
-
-func isSimpleIdentifier(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i, r := range s {
-		switch {
-		case r == '_', r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z':
-		case r >= '0' && r <= '9' && i > 0:
-		default:
-			return false
+	for _, name := range []string{b.Schema, b.Table, b.Column} {
+		if strings.TrimSpace(name) == "" || len(name) > maxIdentifierLen {
+			return fmt.Sprintf("schema, tabel, dan kolom wajib diisi, maksimal %d karakter", maxIdentifierLen)
 		}
 	}
-	return true
-}
-
-// EnsureSQLEditable menolak perubahan SQL bila migration pernah dieksekusi.
-func EnsureSQLEditable(m Migration) error {
-	if m.SQLLocked {
-		return fmt.Errorf("%w: migration %d sudah pernah dieksekusi (revisi %d)", ErrSQLNotEditable, m.ID, m.Revision)
+	if b.Size < 1 || b.Size > maxBatchSize {
+		return fmt.Sprintf("ukuran batch harus 1 sampai %d", maxBatchSize)
 	}
-	return nil
+	return ""
 }

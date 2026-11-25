@@ -7,11 +7,15 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/apperr"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/migration"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/queue"
 )
 
 type Targets struct{ Registry *Registry }
 
-var _ migration.TargetRegistry = Targets{}
+var (
+	_ migration.TargetRegistry = Targets{}
+	_ queue.Targets            = Targets{}
+)
 
 func (t Targets) Get(ctx context.Context, databaseID int64) (migration.Target, error) {
 	conn, err := t.Registry.Get(ctx, databaseID)
@@ -19,6 +23,15 @@ func (t Targets) Get(ctx context.Context, databaseID int64) (migration.Target, e
 		return nil, mapOpenError(err)
 	}
 	return target{conn: conn}, nil
+}
+
+func (t Targets) Migrator(ctx context.Context, databaseID int64) (dbms.Migrator, error) {
+	t.Registry.Invalidate(databaseID)
+	conn, err := t.Registry.Get(ctx, databaseID)
+	if err != nil {
+		return nil, mapOpenError(err)
+	}
+	return conn.Migrator(), nil
 }
 
 func mapOpenError(err error) error {
@@ -31,22 +44,7 @@ func mapOpenError(err error) error {
 
 type target struct{ conn dbms.Conn }
 
-func (t target) Apply(ctx context.Context, in migration.ApplyRequest) (*migration.ApplyResult, error) {
-	res, err := t.conn.Migrator().Apply(ctx, dbms.ApplyInput{
-		SQL:         in.SQL,
-		DatabaseID:  in.DatabaseID,
-		MigrationID: in.MigrationID,
-		RunID:       in.RunID,
-		Version:     in.Version,
-		Checksum:    in.Checksum,
-	})
-	if err != nil {
-		return nil, apperr.Wrap(apperr.CodeMigrationFailed, err.Error(), err)
-	}
-	return &migration.ApplyResult{StatementsExecuted: res.StatementsExecuted, AppliedAt: res.AppliedAt}, nil
-}
-
-func (t target) Explain(ctx context.Context, sql string, analyze bool) (any, error) {
+func (t target) Explain(ctx context.Context, sql string, analyze bool) (*dbms.ExplainResult, error) {
 	res, err := t.conn.Explainer().Explain(ctx, dbms.ExplainInput{SQL: sql, Analyze: analyze})
 	if err != nil {
 		return nil, apperr.Wrap(apperr.CodeMigrationFailed, err.Error(), err)
@@ -60,12 +58,4 @@ func (t target) CommittedRun(ctx context.Context, runID int64) (int, bool, error
 		return 0, false, mapOpenError(err)
 	}
 	return version, found, nil
-}
-
-func (t target) Snapshot(ctx context.Context) (any, error) {
-	model, err := t.conn.Inspector().Snapshot(ctx)
-	if err != nil {
-		return nil, mapOpenError(err)
-	}
-	return model, nil
 }
