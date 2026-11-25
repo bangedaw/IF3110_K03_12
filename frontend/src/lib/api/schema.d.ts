@@ -2320,6 +2320,7 @@ export interface components {
             /** @enum {string} */
             decision: "approved" | "rejected";
             comment?: string;
+<<<<<<< HEAD
         };
         Job: {
             /** Format: int64 */
@@ -2354,6 +2355,8 @@ export interface components {
              * @description Hanya ada saat status pending. Waktu paling cepat worker mengambil attempt berikutnya (jeda retry atau menunggu lock).
              */
             runAfter?: string;
+=======
+>>>>>>> ba172295f318908c865e005828b8869c08f90f04
         };
         SchemaDiffRequest: {
             against: {
@@ -2453,6 +2456,12 @@ export interface components {
         DatabaseId: number;
         SchemaName: string;
         TableName: string;
+<<<<<<< HEAD
+=======
+        /** @description Harus salah satu nama kolom tabel (ditolak driver bila bukan) */
+        OrderBy: string;
+        OrderDir: "asc" | "desc";
+>>>>>>> ba172295f318908c865e005828b8869c08f90f04
         MigrationId: number;
         SnapshotId: number;
         JobId: number;

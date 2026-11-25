@@ -58,6 +58,7 @@ const (
 	View  ExplorerTableSummaryKind = "view"
 )
 
+<<<<<<< HEAD
 // Defines values for JobKind.
 const (
 	JobKindApply    JobKind = "apply"
@@ -74,6 +75,8 @@ const (
 	JobStatusSucceeded JobStatus = "succeeded"
 )
 
+=======
+>>>>>>> ba172295f318908c865e005828b8869c08f90f04
 // Defines values for MigrationApprovalDecision.
 const (
 	MigrationApprovalDecisionApproved MigrationApprovalDecision = "approved"
