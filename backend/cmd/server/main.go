@@ -26,9 +26,11 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/migration"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/queue"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/secret"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/spa"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqltrace"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/telemetry"
 
 	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/mysql"
 	_ "github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres"
@@ -46,8 +48,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logger := slog.New(telemetry.NewHandler(slog.NewJSONHandler(os.Stdout, nil)))
 	slog.SetDefault(logger)
+	// Span ditulis ke stderr supaya stdout tetap berisi log saja.
+	shutdownTracing, err := telemetry.Setup("dbmp-server", cfg.TracesExporter, os.Stderr)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		flushCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdownTracing(flushCtx); err != nil {
+			logger.Error("flush span", "err", err)
+		}
+	}()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -130,6 +144,7 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, ui f
 			admin.Routes(p, adminSvc)
 			dbconn.Routes(p, connSvc)
 			explorer.Routes(p, explorerSvc)
+			queue.Routes(p, queue.Handler{Jobs: queue.NewPostgres(pool), Authz: az})
 		})
 	})
 	if h, ok := spa.Handler(ui); ok {

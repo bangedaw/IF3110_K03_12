@@ -28,6 +28,7 @@ type demoConnection struct {
 type demoGroup struct {
 	Name        string
 	Description string
+	Leader      string
 	Members     []string
 	Grants      map[string]string
 }
@@ -48,12 +49,14 @@ var demoGroups = []demoGroup{
 	{
 		Name:        "backend-team",
 		Description: "Edit pada inventory, lihat staging",
+		Leader:      "alice",
 		Members:     []string{"alice", "carol"},
 		Grants:      map[string]string{"inventory": "edit", "staging": "view"},
 	},
 	{
 		Name:        "analyst",
 		Description: "Lihat inventory dan sales",
+		Leader:      "bob",
 		Members:     []string{"bob", "carol"},
 		Grants:      map[string]string{"inventory": "view", "sales": "view"},
 	},
@@ -164,6 +167,10 @@ func seedDemo(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, pa
 				if _, err := tx.Exec(ctx, `INSERT INTO group_members (group_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`, groupID, userIDs[member]); err != nil {
 					return fmt.Errorf("member %s: %w", member, err)
 				}
+			}
+			// Leader ditunjuk setelah menjadi anggota, sesuai constraint groups_leader_is_member.
+			if _, err := tx.Exec(ctx, `UPDATE groups SET leader_user_id = $2 WHERE id = $1`, groupID, userIDs[g.Leader]); err != nil {
+				return fmt.Errorf("leader %s: %w", g.Name, err)
 			}
 			for database, level := range g.Grants {
 				if _, err := tx.Exec(ctx, `

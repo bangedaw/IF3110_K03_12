@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -13,6 +12,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
 )
 
 const (
@@ -31,13 +31,10 @@ type Browser struct {
 var _ dbms.DataBrowser = (*Browser)(nil)
 
 func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, error) {
-	if q.Schema != b.database || excludedSchema(q.Schema) {
+	if q.Schema != b.database || excludedSchema(q.Schema) || schema.IsInternalTable(q.Table) {
 		return nil, dbms.ErrNotFound
 	}
-	limit, offset, err := normalizePage(q)
-	if err != nil {
-		return nil, err
-	}
+	limit, offset := normalizePage(q)
 
 	tx, err := b.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -67,11 +64,8 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 	if len(cols) == 0 {
 		return nil, dbms.ErrNotFound
 	}
-	if q.OrderBy != "" && !slices.Contains(cols, q.OrderBy) {
-		return nil, fmt.Errorf("%w: kolom urut tidak valid", dbms.ErrInvalidQuery)
-	}
 
-	query := rowsSQL(q.Schema, q.Table, cols, q, limit, offset)
+	query := rowsSQL(q.Schema, q.Table, cols, limit, offset)
 	rows, err := tx.QueryContext(ctx, query)
 	if err != nil {
 		return nil, rowsError(err)
@@ -148,27 +142,20 @@ func columnNames(ctx context.Context, tx *sql.Tx, schemaName, table string) ([]s
 	return cols, rows.Err()
 }
 
-func rowsSQL(schemaName, table string, cols []string, q dbms.RowsQuery, limit, offset int) string {
+func rowsSQL(schemaName, table string, cols []string, limit, offset int) string {
 	reg := backtickQualified(schemaName, table)
 	quoted := make([]string, len(cols))
 	for i, c := range cols {
 		quoted[i] = "CAST(" + backtick(c) + " AS CHAR)"
 	}
 	orderBy := reg + "." + backtick(cols[0])
-	if q.OrderBy != "" {
-		orderBy = reg + "." + backtick(q.OrderBy)
-	}
-	dir := "ASC"
-	if strings.EqualFold(q.OrderDir, "desc") {
-		dir = "DESC"
-	}
 	return fmt.Sprintf(
-		"SELECT %s FROM %s ORDER BY %s %s LIMIT %d OFFSET %d",
-		strings.Join(quoted, ", "), reg, orderBy, dir, limit, offset,
+		"SELECT %s FROM %s ORDER BY %s LIMIT %d OFFSET %d",
+		strings.Join(quoted, ", "), reg, orderBy, limit, offset,
 	)
 }
 
-func normalizePage(q dbms.RowsQuery) (limit, offset int, err error) {
+func normalizePage(q dbms.RowsQuery) (limit, offset int) {
 	limit = q.Limit
 	if limit <= 0 {
 		limit = defaultRowsLimit
@@ -180,12 +167,7 @@ func normalizePage(q dbms.RowsQuery) (limit, offset int, err error) {
 	if offset < 0 {
 		offset = 0
 	}
-	switch strings.ToLower(q.OrderDir) {
-	case "", "asc", "desc":
-	default:
-		return 0, 0, fmt.Errorf("%w: arah urut tidak valid", dbms.ErrInvalidQuery)
-	}
-	return limit, offset, nil
+	return limit, offset
 }
 
 func cellOf(v any) dbms.Cell {

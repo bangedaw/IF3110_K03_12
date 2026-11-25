@@ -100,7 +100,9 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
     patch:
       tags: [admin]
-      description: Menonaktifkan user (isActive=false) me-revoke semua session-nya.
+      description: >
+        Menonaktifkan user (isActive=false) me-revoke semua session-nya. Ditolak (409) jika user masih
+        menjadi leader group.
       requestBody:
         required: true
         content:
@@ -115,14 +117,17 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
     delete:
       tags: [admin]
+      description: Ditolak (409) untuk akun sendiri atau jika user masih menjadi leader group.
       responses:
         '204': { description: Deleted }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/admin/users/{userId}/password:
     parameters:
       - $ref: '#/components/parameters/UserId'
@@ -237,11 +242,37 @@ paths:
     delete:
       tags: [admin]
       summary: Keluarkan user dari group
+      description: Leader tidak bisa dikeluarkan (409) sebelum leader lain ditunjuk.
       responses:
         '204': { description: Anggota dikeluarkan }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/admin/groups/{groupId}/leader:
+    parameters:
+      - $ref: '#/components/parameters/GroupId'
+    put:
+      tags: [admin]
+      summary: Tunjuk leader group
+      description: >
+        Leader harus anggota group dan user yang aktif. Leader lama tetap menjadi anggota. Leader menyetujui
+        setiap migration pada database yang bisa diakses group-nya.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/GroupLeaderSet' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Group' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
   /api/admin/groups/{groupId}/grants:
     parameters:
       - $ref: '#/components/parameters/GroupId'
@@ -269,6 +300,9 @@ paths:
     put:
       tags: [admin]
       summary: Set level akses group pada database (buat atau ubah)
+      description: >
+        Menambah akses (grant baru atau naik ke edit) ditolak (409) untuk group yang belum punya leader,
+        karena migration pada database itu tidak akan bisa disetujui. Menurunkan akses tetap boleh.
       requestBody:
         required: true
         content:
@@ -283,6 +317,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
     delete:
       tags: [admin]
@@ -485,8 +520,6 @@ paths:
       - $ref: '#/components/parameters/TableName'
       - $ref: '#/components/parameters/Limit'
       - $ref: '#/components/parameters/Offset'
-      - $ref: '#/components/parameters/OrderBy'
-      - $ref: '#/components/parameters/OrderDir'
     get:
       tags: [explorer]
       summary: Halaman baris data (read-only); nilai sel sudah diserialisasi aman
@@ -499,7 +532,6 @@ paths:
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '422': { $ref: '#/components/responses/ValidationFailed' }
         '503': { $ref: '#/components/responses/DBUnreachable' }
 
   /api/databases/{databaseId}/snapshots:
@@ -542,6 +574,23 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/SchemaSnapshot' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/databases/{databaseId}/jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [jobs]
+      summary: Status job eksekusi migration (terkunci pada database; lintas database -> 404)
+      description: Butuh akses View Only atau View + Edit ke database. Dipakai SPA untuk memantau progres.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
         '401': { $ref: '#/components/responses/Unauthenticated' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
@@ -815,6 +864,11 @@ components:
       in: path
       required: true
       schema: { type: integer, format: int64 }
+    JobId:
+      name: jobId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
 
   responses:
     Unauthenticated:
@@ -926,12 +980,18 @@ components:
         total: { type: integer, format: int64 }
     Group:
       type: object
-      required: [id, name, description, createdAt]
+      required: [id, name, description, createdAt, leaderId, leaderUsername]
       properties:
         id: { type: integer, format: int64 }
         name: { type: string }
         description: { type: string }
         createdAt: { type: string, format: date-time }
+        leaderId:
+          type: integer
+          format: int64
+          nullable: true
+          description: Kosong hanya untuk group dari Milestone 1 yang belum ditunjuk leader-nya.
+        leaderUsername: { type: string, nullable: true }
     GroupDetail:
       allOf:
         - $ref: '#/components/schemas/Group'
@@ -943,10 +1003,19 @@ components:
               items: { $ref: '#/components/schemas/User' }
     GroupCreate:
       type: object
-      required: [name]
+      required: [name, leaderId]
       properties:
         name: { type: string, minLength: 1, maxLength: 64 }
         description: { type: string, maxLength: 512 }
+        leaderId:
+          type: integer
+          format: int64
+          description: User aktif yang menjadi leader sekaligus anggota pertama group.
+    GroupLeaderSet:
+      type: object
+      required: [userId]
+      properties:
+        userId: { type: integer, format: int64 }
     GroupUpdate:
       type: object
       properties:
@@ -1270,6 +1339,30 @@ components:
         kind: { $ref: '#/components/schemas/MigrationKind' }
         decision: { type: string, enum: [approved, rejected] }
         comment: { type: string, maxLength: 2000 }
+    Job:
+      type: object
+      required: [id, requestId, databaseId, kind, status, attempts, maxAttempts, batchesCommitted, rowsCommitted, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        requestId: { type: integer, format: int64 }
+        databaseId: { type: integer, format: int64 }
+        kind:
+          type: string
+          enum: [apply, rollback, forward]
+          description: Jenis request. Status partial pada rollback berarti sebagian batch sudah dibatalkan (partially reverted).
+        status: { type: string, enum: [pending, running, succeeded, failed, partial] }
+        attempts: { type: integer, description: Jumlah attempt yang sudah dimulai }
+        maxAttempts: { type: integer }
+        batchesCommitted: { type: integer, description: Batch yang saat ini ter-commit di database target (mode batch) }
+        rowsCommitted: { type: integer, format: int64 }
+        lastError: { type: string }
+        createdAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+        runAfter:
+          type: string
+          format: date-time
+          description: Hanya ada saat status pending. Waktu paling cepat worker mengambil attempt berikutnya (jeda retry atau menunggu lock).
 
     SchemaDiffRequest:
       type: object

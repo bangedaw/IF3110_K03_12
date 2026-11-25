@@ -126,11 +126,10 @@ func TestBatchFailureKeepsEarlierBatchesAndResumesFromCheckpoint(t *testing.T) {
 	_, err = pool.Exec(context.Background(), `INSERT INTO app.items (id, label, grp) VALUES (5000, 'baru', 0)`)
 	require.NoError(t, err)
 
-	resumed := batchInput(102, 200)
-	p, err = m.ApplyBatches(context.Background(), resumed)
+	p, err = m.ApplyBatches(context.Background(), batchInput(102, 100))
 
 	require.NoError(t, err)
-	assert.Equal(t, 8, p.BatchesCommitted, "5 batch lama + 3 batch baru berukuran 200")
+	assert.Equal(t, 11, p.BatchesCommitted, "5 batch lama + 6 batch sisanya")
 	assert.EqualValues(t, 1050, p.RowsCommitted)
 	assert.Equal(t, dbms.BatchCompleted, p.State())
 	assert.Equal(t, map[int]int{1: 1050}, hitsBetween(t, pool, 1, 1050), "tidak ada batch yang diulang")

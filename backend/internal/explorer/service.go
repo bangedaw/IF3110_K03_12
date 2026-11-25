@@ -361,9 +361,6 @@ func mapTargetErr(err error) error {
 	if errors.Is(err, dbms.ErrNotFound) {
 		return apperr.ErrNotFound
 	}
-	if errors.Is(err, dbms.ErrInvalidQuery) {
-		return apperr.Validation(map[string]string{"query": strings.TrimPrefix(err.Error(), dbms.ErrInvalidQuery.Error()+": ")})
-	}
 	var ae *apperr.Error
 	if errors.As(err, &ae) {
 		return ae

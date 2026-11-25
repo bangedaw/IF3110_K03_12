@@ -143,12 +143,6 @@ const (
 	ToTarget SchemaDiffRequestDirection = "toTarget"
 )
 
-// Defines values for OrderDir.
-const (
-	Asc  OrderDir = "asc"
-	Desc OrderDir = "desc"
-)
-
 // AccessLevel defines model for AccessLevel.
 type AccessLevel string
 
@@ -377,13 +371,20 @@ type Group struct {
 	CreatedAt   time.Time `json:"createdAt"`
 	Description string    `json:"description"`
 	Id          int64     `json:"id"`
-	Name        string    `json:"name"`
+
+	// LeaderId Kosong hanya untuk group dari Milestone 1 yang belum ditunjuk leader-nya.
+	LeaderId       *int64  `json:"leaderId"`
+	LeaderUsername *string `json:"leaderUsername"`
+	Name           string  `json:"name"`
 }
 
 // GroupCreate defines model for GroupCreate.
 type GroupCreate struct {
 	Description *string `json:"description,omitempty"`
-	Name        string  `json:"name"`
+
+	// LeaderId User aktif yang menjadi leader sekaligus anggota pertama group.
+	LeaderId int64  `json:"leaderId"`
+	Name     string `json:"name"`
 }
 
 // GroupDetail defines model for GroupDetail.
@@ -391,8 +392,17 @@ type GroupDetail struct {
 	CreatedAt   time.Time `json:"createdAt"`
 	Description string    `json:"description"`
 	Id          int64     `json:"id"`
-	Members     []User    `json:"members"`
-	Name        string    `json:"name"`
+
+	// LeaderId Kosong hanya untuk group dari Milestone 1 yang belum ditunjuk leader-nya.
+	LeaderId       *int64  `json:"leaderId"`
+	LeaderUsername *string `json:"leaderUsername"`
+	Members        []User  `json:"members"`
+	Name           string  `json:"name"`
+}
+
+// GroupLeaderSet defines model for GroupLeaderSet.
+type GroupLeaderSet struct {
+	UserId int64 `json:"userId"`
 }
 
 // GroupPage defines model for GroupPage.
@@ -408,6 +418,37 @@ type GroupUpdate struct {
 	Description *string `json:"description,omitempty"`
 	Name        *string `json:"name,omitempty"`
 }
+
+// Job defines model for Job.
+type Job struct {
+	// Attempts Jumlah attempt yang sudah dimulai
+	Attempts int `json:"attempts"`
+
+	// BatchesCommitted Batch yang saat ini ter-commit di database target (mode batch)
+	BatchesCommitted int        `json:"batchesCommitted"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	DatabaseId       int64      `json:"databaseId"`
+	FinishedAt       *time.Time `json:"finishedAt,omitempty"`
+	Id               int64      `json:"id"`
+
+	// Kind Jenis request. Status partial pada rollback berarti sebagian batch sudah dibatalkan (partially reverted).
+	Kind          JobKind `json:"kind"`
+	LastError     *string `json:"lastError,omitempty"`
+	MaxAttempts   int     `json:"maxAttempts"`
+	RequestId     int64   `json:"requestId"`
+	RowsCommitted int64   `json:"rowsCommitted"`
+
+	// RunAfter Hanya ada saat status pending. Waktu paling cepat worker mengambil attempt berikutnya (jeda retry atau menunggu lock).
+	RunAfter  *time.Time `json:"runAfter,omitempty"`
+	StartedAt *time.Time `json:"startedAt,omitempty"`
+	Status    JobStatus  `json:"status"`
+}
+
+// JobKind Jenis request. Status partial pada rollback berarti sebagian batch sudah dibatalkan (partially reverted).
+type JobKind string
+
+// JobStatus defines model for Job.Status.
+type JobStatus string
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
@@ -648,6 +689,9 @@ type DatabaseId = int64
 // GroupId defines model for GroupId.
 type GroupId = int64
 
+// JobId defines model for JobId.
+type JobId = int64
+
 // Limit defines model for Limit.
 type Limit = int
 
@@ -656,12 +700,6 @@ type MigrationId = int64
 
 // Offset defines model for Offset.
 type Offset = int
-
-// OrderBy defines model for OrderBy.
-type OrderBy = string
-
-// OrderDir defines model for OrderDir.
-type OrderDir string
 
 // SchemaName defines model for SchemaName.
 type SchemaName = string
@@ -722,10 +760,6 @@ type GetApiDatabasesDatabaseIdMigrationHistoryParams struct {
 type GetApiDatabasesDatabaseIdSchemasSchemaNameTablesTableNameRowsParams struct {
 	Limit  *Limit  `form:"limit,omitempty" json:"limit,omitempty"`
 	Offset *Offset `form:"offset,omitempty" json:"offset,omitempty"`
-
-	// OrderBy Harus salah satu nama kolom tabel (ditolak driver bila bukan)
-	OrderBy  *OrderBy  `form:"orderBy,omitempty" json:"orderBy,omitempty"`
-	OrderDir *OrderDir `form:"orderDir,omitempty" json:"orderDir,omitempty"`
 }
 
 // GetApiMigrationsMigrationIdApprovalsParams defines parameters for GetApiMigrationsMigrationIdApprovals.
@@ -750,6 +784,9 @@ type PatchApiAdminGroupsGroupIdJSONRequestBody = GroupUpdate
 
 // PutApiAdminGroupsGroupIdGrantsDatabaseIdJSONRequestBody defines body for PutApiAdminGroupsGroupIdGrantsDatabaseId for application/json ContentType.
 type PutApiAdminGroupsGroupIdGrantsDatabaseIdJSONRequestBody = GrantUpsert
+
+// PutApiAdminGroupsGroupIdLeaderJSONRequestBody defines body for PutApiAdminGroupsGroupIdLeader for application/json ContentType.
+type PutApiAdminGroupsGroupIdLeaderJSONRequestBody = GroupLeaderSet
 
 // PostApiAdminUsersJSONRequestBody defines body for PostApiAdminUsers for application/json ContentType.
 type PostApiAdminUsersJSONRequestBody = UserCreate

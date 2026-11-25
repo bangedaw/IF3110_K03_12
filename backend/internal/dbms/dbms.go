@@ -21,8 +21,6 @@ var (
 
 	ErrNotImplemented = errors.New("belum diimplementasi")
 
-	ErrInvalidQuery = errors.New("query tidak valid")
-
 	ErrCommitUncertain = errors.New("hasil commit tidak pasti, periksa riwayat target sebelum retry")
 
 	ErrInvalidDirection = errors.New("arah eksekusi migration tidak dikenal")
@@ -129,12 +127,10 @@ type Explainer interface {
 }
 
 type RowsQuery struct {
-	Schema   string
-	Table    string
-	Limit    int
-	Offset   int
-	OrderBy  string
-	OrderDir string
+	Schema string
+	Table  string
+	Limit  int
+	Offset int
 }
 
 const MaxRows = 200

@@ -2,6 +2,7 @@ package mysql_test
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -64,26 +65,18 @@ func TestRowsPagination(t *testing.T) {
 	require.Equal(t, dbms.MaxRows, big.Limit)
 }
 
-func TestRowsOrderBy(t *testing.T) {
+func TestRowsOrderedByFirstColumn(t *testing.T) {
 	f := newBrowserFixture(t)
-	desc := f.rows(t, dbms.RowsQuery{Table: "orders", Limit: 5, OrderBy: "total", OrderDir: "desc"})
-	require.Equal(t, "350000.00", desc.Rows[0][3].Value)
-
-	asc := f.rows(t, dbms.RowsQuery{Table: "orders", Limit: 5, OrderBy: "total"})
-	require.Equal(t, "21000.00", asc.Rows[0][3].Value, "total terkecil dulu")
-
-	_, err := f.browser.Rows(context.Background(),
-		dbms.RowsQuery{Schema: f.cfg.Database, Table: "orders", OrderBy: "tidak_ada"})
-	require.Error(t, err)
-
-	_, err = f.browser.Rows(context.Background(),
-		dbms.RowsQuery{Schema: f.cfg.Database, Table: "orders", OrderDir: "sideways"})
-	require.Error(t, err)
+	page := f.rows(t, dbms.RowsQuery{Table: "customers"})
+	require.Equal(t, "id", page.Columns[0])
+	for i, row := range page.Rows {
+		require.Equal(t, strconv.Itoa(i+1), row[0].Value)
+	}
 }
 
 func TestRowsIsNullCell(t *testing.T) {
 	f := newBrowserFixture(t)
-	page := f.rows(t, dbms.RowsQuery{Table: "customers", OrderBy: "id"})
+	page := f.rows(t, dbms.RowsQuery{Table: "customers"})
 	require.Len(t, page.Rows, 3)
 
 	require.True(t, page.Rows[1][3].IsNull)

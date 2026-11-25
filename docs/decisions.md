@@ -253,7 +253,11 @@ group yang punya akses ke database tersebut, baik View Only maupun View + Edit.
 
 - **Group tidak boleh tanpa leader.** Leader wajib diisi saat group dibuat dan harus anggota group itu.
   Leader tidak bisa dikeluarkan dari group, dihapus, atau dinonaktifkan sebelum penggantinya ditunjuk.
-- **Fail closed.** Group dari Milestone 1 yang belum punya leader tidak bisa diberi akses baru, dan
+  Mengeluarkan leader ditolak constraint `groups_leader_is_member`. Menonaktifkan dan menghapus user
+  diperiksa di service sambil memegang kunci `FOR UPDATE` pada baris user, sedangkan penunjukan leader
+  memegang `FOR SHARE`, sehingga dua admin yang bertindak bersamaan tidak bisa menghasilkan leader nonaktif.
+- **Fail closed.** Group dari Milestone 1 yang belum punya leader tidak bisa diberi akses baru (grant baru
+  atau naik ke View + Edit; menurunkan dan mencabut akses tetap boleh), dan
   migration pada database yang diaksesnya tertahan di Pending Review sampai admin menunjuk leader.
   Approval tidak pernah dilewati diam-diam.
 - **Platform Admin tidak ikut menyetujui karena jabatannya.** Admin hanya menyetujui jika ia leader salah

@@ -123,6 +123,7 @@ func TestNonAdminIsForbiddenOnEveryEndpoint(t *testing.T) {
 		{"DELETE", path("/api/admin/groups/%d", g), ""},
 		{"PUT", path("/api/admin/groups/%d/members/%d", g, e.userID), ""},
 		{"DELETE", path("/api/admin/groups/%d/members/%d", g, e.userID), ""},
+		{"PUT", path("/api/admin/groups/%d/leader", g), path(`{"userId":%d}`, e.userID)},
 		{"GET", path("/api/admin/groups/%d/grants", g), ""},
 		{"PUT", path("/api/admin/groups/%d/grants/%d", g, e.dbID), `{"level":"edit"}`},
 		{"DELETE", path("/api/admin/groups/%d/grants/%d", g, e.dbID), ""},
@@ -204,10 +205,10 @@ func TestGroupsMembersAndGrants(t *testing.T) {
 	ctx := context.Background()
 	az := authz.NewDBAuthorizer(e.pool)
 
-	require.Equal(t, http.StatusCreated, e.do(a, "POST", "/api/admin/groups", `{"name":"backend-team","description":"tim backend"}`).Code)
+	require.Equal(t, http.StatusCreated, e.do(a, "POST", "/api/admin/groups", path(`{"name":"backend-team","description":"tim backend","leaderId":%d}`, a)).Code)
 	g := e.id(`SELECT id FROM groups WHERE name = 'backend-team'`)
-	assert.Equal(t, http.StatusConflict, e.do(a, "POST", "/api/admin/groups", `{"name":"Backend-Team"}`).Code)
-	assert.Equal(t, http.StatusUnprocessableEntity, e.do(a, "POST", "/api/admin/groups", `{"name":"  "}`).Code)
+	assert.Equal(t, http.StatusConflict, e.do(a, "POST", "/api/admin/groups", path(`{"name":"Backend-Team","leaderId":%d}`, a)).Code)
+	assert.Equal(t, http.StatusUnprocessableEntity, e.do(a, "POST", "/api/admin/groups", path(`{"name":"  ","leaderId":%d}`, a)).Code)
 
 	s := e.session(e.userID)
 	require.Equal(t, http.StatusNoContent, e.do(a, "PUT", path("/api/admin/groups/%d/members/%d", g, e.userID), "").Code)
@@ -282,4 +283,106 @@ func TestAuditLogHasNoSecrets(t *testing.T) {
 	assert.EqualValues(t, 2, e.scalar(`SELECT count(*) FROM audit_logs WHERE actor_user_id = $1 AND outcome = 'success'`, e.adminID))
 	assert.EqualValues(t, 0, e.scalar(`SELECT count(*) FROM audit_logs
 		WHERE metadata::text ILIKE '%rahasia%' OR metadata::text ILIKE '%argon2%'`))
+}
+
+func TestGroupLeader(t *testing.T) {
+	e := setup(t)
+	a := e.adminID
+	inactive := e.id(`INSERT INTO users (username, password_hash, is_active) VALUES ('carol', 'x', FALSE) RETURNING id`)
+	bob := e.id(`INSERT INTO users (username, password_hash) VALUES ('bob', 'x') RETURNING id`)
+
+	rec := e.do(a, "POST", "/api/admin/groups", `{"name":"tanpa-leader"}`)
+	assert.Equal(t, http.StatusUnprocessableEntity, rec.Code, "leader wajib diisi")
+	assert.Contains(t, rec.Body.String(), `"leaderId"`)
+	assert.Equal(t, http.StatusUnprocessableEntity, e.do(a, "POST", "/api/admin/groups", path(`{"name":"x","leaderId":%d}`, inactive)).Code, "leader harus aktif")
+	assert.Equal(t, http.StatusUnprocessableEntity, e.do(a, "POST", "/api/admin/groups", `{"name":"x","leaderId":9999}`).Code)
+	assert.EqualValues(t, 0, e.scalar(`SELECT count(*) FROM groups`), "group yang ditolak tidak tersisa sebagian")
+
+	rec = e.do(a, "POST", "/api/admin/groups", path(`{"name":"analyst","leaderId":%d}`, e.userID))
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), path(`"leaderId":%d`, e.userID))
+	assert.Contains(t, rec.Body.String(), `"leaderUsername":"alice"`)
+	g := e.id(`SELECT id FROM groups WHERE name = 'analyst'`)
+	assert.EqualValues(t, 1, e.scalar(`SELECT count(*) FROM group_members WHERE group_id = $1 AND user_id = $2`, g, e.userID), "leader otomatis menjadi anggota")
+
+	leader := path("/api/admin/groups/%d/leader", g)
+	assert.Equal(t, http.StatusConflict, e.do(a, "PUT", leader, path(`{"userId":%d}`, bob)).Code, "bukan anggota")
+	require.Equal(t, http.StatusNoContent, e.do(a, "PUT", path("/api/admin/groups/%d/members/%d", g, inactive), "").Code)
+	assert.Equal(t, http.StatusConflict, e.do(a, "PUT", leader, path(`{"userId":%d}`, inactive)).Code, "anggota nonaktif")
+	assert.Equal(t, http.StatusNotFound, e.do(a, "PUT", leader, `{"userId":9999}`).Code)
+	assert.Equal(t, http.StatusNotFound, e.do(a, "PUT", "/api/admin/groups/9999/leader", path(`{"userId":%d}`, bob)).Code)
+
+	require.Equal(t, http.StatusNoContent, e.do(a, "PUT", path("/api/admin/groups/%d/members/%d", g, bob), "").Code)
+	rec = e.do(a, "PUT", leader, path(`{"userId":%d}`, bob))
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	assert.Contains(t, rec.Body.String(), `"leaderUsername":"bob"`)
+	assert.EqualValues(t, 1, e.scalar(`SELECT count(*) FROM group_members WHERE group_id = $1 AND user_id = $2`, g, e.userID), "leader lama tetap anggota")
+	assert.EqualValues(t, 1, e.scalar(`SELECT count(*) FROM audit_logs WHERE action = 'admin.group.set_leader'
+		AND metadata->>'leaderId' = $1 AND metadata->>'previousLeaderId' = $2`, path("%d", bob), path("%d", e.userID)))
+
+	rec = e.do(a, "GET", "/api/admin/groups", "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"leaderUsername":"bob"`)
+	rec = e.do(a, "GET", path("/api/admin/groups/%d", g), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), path(`"leaderId":%d`, bob))
+
+	old := e.id(`INSERT INTO groups (name) VALUES ('dari-m1') RETURNING id`)
+	rec = e.do(a, "GET", path("/api/admin/groups/%d", old), "")
+	require.Equal(t, http.StatusOK, rec.Code)
+	assert.Contains(t, rec.Body.String(), `"leaderId":null`, "group lama tanpa leader tetap terbaca")
+}
+
+func TestGroupNeverLosesItsLeader(t *testing.T) {
+	e := setup(t)
+	a := e.adminID
+	rec := e.do(a, "POST", "/api/admin/groups", path(`{"name":"analyst","leaderId":%d}`, e.userID))
+	require.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+	g := e.id(`SELECT id FROM groups WHERE name = 'analyst'`)
+	user := path("/api/admin/users/%d", e.userID)
+
+	rec = e.do(a, "DELETE", path("/api/admin/groups/%d/members/%d", g, e.userID), "")
+	assert.Equal(t, http.StatusConflict, rec.Code, "leader tidak bisa dikeluarkan")
+	assert.Contains(t, rec.Body.String(), "tunjuk leader lain")
+
+	rec = e.do(a, "PATCH", user, `{"isActive":false}`)
+	assert.Equal(t, http.StatusConflict, rec.Code, "leader tidak bisa dinonaktifkan")
+	assert.Contains(t, rec.Body.String(), "analyst", "pesan menyebut group yang dipimpin")
+	assert.EqualValues(t, true, e.scalar(`SELECT is_active FROM users WHERE id = $1`, e.userID))
+	require.Equal(t, http.StatusOK, e.do(a, "PATCH", user, `{"displayName":"Alice"}`).Code, "perubahan lain tetap boleh")
+
+	assert.Equal(t, http.StatusConflict, e.do(a, "DELETE", user, "").Code, "leader tidak bisa dihapus")
+	assert.EqualValues(t, 1, e.scalar(`SELECT count(*) FROM users WHERE id = $1`, e.userID))
+
+	bob := e.id(`INSERT INTO users (username, password_hash) VALUES ('bob', 'x') RETURNING id`)
+	require.Equal(t, http.StatusNoContent, e.do(a, "PUT", path("/api/admin/groups/%d/members/%d", g, bob), "").Code)
+	require.Equal(t, http.StatusOK, e.do(a, "PUT", path("/api/admin/groups/%d/leader", g), path(`{"userId":%d}`, bob)).Code)
+
+	require.Equal(t, http.StatusOK, e.do(a, "PATCH", user, `{"isActive":false}`).Code, "setelah diganti, leader lama boleh dinonaktifkan")
+	require.Equal(t, http.StatusNoContent, e.do(a, "DELETE", path("/api/admin/groups/%d/members/%d", g, e.userID), "").Code)
+	require.Equal(t, http.StatusNoContent, e.do(a, "DELETE", user, "").Code)
+	assert.EqualValues(t, bob, e.scalar(`SELECT leader_user_id FROM groups WHERE id = $1`, g))
+}
+
+func TestGroupWithoutLeaderCannotGainAccess(t *testing.T) {
+	e := setup(t)
+	a := e.adminID
+	old := e.id(`INSERT INTO groups (name) VALUES ('dari-m1') RETURNING id`)
+	_, err := e.pool.Exec(context.Background(), `INSERT INTO group_database_grants (group_id, database_id, level) VALUES ($1, $2, 'edit')`, old, e.dbID)
+	require.NoError(t, err)
+	grant := path("/api/admin/groups/%d/grants/%d", old, e.dbID)
+
+	require.Equal(t, http.StatusOK, e.do(a, "PUT", grant, `{"level":"view"}`).Code, "menurunkan akses tetap boleh")
+	rec := e.do(a, "PUT", grant, `{"level":"edit"}`)
+	assert.Equal(t, http.StatusConflict, rec.Code, "menaikkan akses ditolak tanpa leader")
+	assert.Contains(t, rec.Body.String(), "belum punya leader")
+	other := e.id(`INSERT INTO database_connections (name, kind, host, port, database_name, username, password_ciphertext)
+		VALUES ('sales', 'postgres', 'localhost', 5432, 'sales', 'u', '\x00') RETURNING id`)
+	assert.Equal(t, http.StatusConflict, e.do(a, "PUT", path("/api/admin/groups/%d/grants/%d", old, other), `{"level":"view"}`).Code, "grant baru ditolak")
+	assert.Equal(t, http.StatusNotFound, e.do(a, "PUT", path("/api/admin/groups/9999/grants/%d", e.dbID), `{"level":"view"}`).Code)
+	require.Equal(t, http.StatusNoContent, e.do(a, "DELETE", grant, "").Code, "mencabut akses tetap boleh")
+
+	require.Equal(t, http.StatusNoContent, e.do(a, "PUT", path("/api/admin/groups/%d/members/%d", old, e.userID), "").Code)
+	require.Equal(t, http.StatusOK, e.do(a, "PUT", path("/api/admin/groups/%d/leader", old), path(`{"userId":%d}`, e.userID)).Code)
+	assert.Equal(t, http.StatusOK, e.do(a, "PUT", grant, `{"level":"edit"}`).Code, "setelah leader ditunjuk, akses bisa ditambah")
 }

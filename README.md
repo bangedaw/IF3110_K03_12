@@ -57,7 +57,9 @@ cd backend && go run ./cmd/dbmpctl seed-demo            # opsional: -password <s
 ```
 
 Perintah ini idempotent dan membuat akun berikut dengan password `demo12345`, tiga koneksi di atas,
-serta dua group (`backend-team`: alice, carol; `analyst`: bob, carol):
+serta dua group (`backend-team`: alice sebagai leader, carol; `analyst`: bob sebagai leader, carol).
+Migration pada `inventory` butuh persetujuan alice dan bob karena kedua group punya akses ke sana; carol
+anggota keduanya tetapi bukan leader, jadi tidak ikut menyetujui.
 
 | User | Akses efektif |
 |---|---|
@@ -123,14 +125,17 @@ Mode batch dijalankan oleh `dbms.BatchMigrator` (implementasi PostgreSQL di
   nomor batch, rentang cursor, jumlah row) ditulis di database target dalam transaction yang sama dengan
   perubahan batch, sehingga checkpoint selalu sesuai dengan data yang benar-benar committed.
 - Melanjutkan eksekusi yang gagal memakai execution ID yang sama dan mulai dari checkpoint terakhir.
-  Ukuran batch boleh diubah saat melanjutkan. Batch yang sudah committed tidak diulang, termasuk saat
-  pesan job terkirim dua kali.
+  Batch yang sudah committed tidak diulang, termasuk saat pesan job terkirim dua kali.
 - Pembatalan menjalankan SQL down per batch dari nomor batch terbesar ke terkecil memakai rentang yang
   tersimpan. Bila gagal di tengah, statusnya `partially_reverted` dan pembatalan dapat dilanjutkan.
   Eksekusi yang sudah dibatalkan, sebagian atau seluruhnya, tidak dapat dilanjutkan ke depan; forward
   dilakukan sebagai eksekusi baru. Migration tanpa SQL down ditolak.
 - Selama eksekusi, koneksi worker memegang advisory lock database target sehingga eksekusi lain pada
   database yang sama ditolak, termasuk di antara commit batch.
+- Riwayat dan checkpoint disimpan di tabel `_dbmp_schema_history`, `_dbmp_batch_run`, dan
+  `_dbmp_batch_checkpoint` pada database target. Prefix `_dbmp_` dicadangkan untuk platform: tabel
+  berawalan itu tidak tampil di explorer, tidak ikut snapshot, dan tidak pernah muncul di SQL schema
+  diff, sehingga sinkronisasi schema tidak bisa menghapus bukti eksekusi.
 
 ### Log dan span eksekusi SQL
 
@@ -218,6 +223,7 @@ Di production set `APP_ENV=production` (cookie `Secure`, wajib di belakang HTTPS
 | `SESSION_ROTATION_INTERVAL` | `15m` | rotasi periodik |
 | `SESSION_GRACE_PERIOD` | `30s` | masa berlaku identifier lama setelah rotasi |
 | `SESSION_TOUCH_INTERVAL` | `60s` | throttle update aktivitas |
+| `OTEL_TRACES_EXPORTER` | `console` | `console` menulis span OpenTelemetry sebagai JSON ke stderr, `none` mematikannya |
 
 Untuk demo session, perpendek misalnya `SESSION_IDLE_TIMEOUT=1m SESSION_ROTATION_INTERVAL=20s`.
 

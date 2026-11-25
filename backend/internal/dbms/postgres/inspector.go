@@ -71,6 +71,9 @@ func (in *Inspector) ListTables(ctx context.Context, schemaName string) ([]schem
 		if err := rows.Scan(&ts.Name, &ts.RowEstimate); err != nil {
 			return nil, fmt.Errorf("baca tabel %s: %w", schemaName, err)
 		}
+		if schema.IsInternalTable(ts.Name) {
+			continue
+		}
 		ts.Schema = schemaName
 		ts.Kind = schema.TableKindTable
 		ts.RowEstimate = nonNegative(ts.RowEstimate)
@@ -80,7 +83,7 @@ func (in *Inspector) ListTables(ctx context.Context, schemaName string) ([]schem
 }
 
 func (in *Inspector) DescribeTable(ctx context.Context, schemaName, table string) (*schema.Table, error) {
-	if excludedSchema(schemaName) {
+	if excludedSchema(schemaName) || schema.IsInternalTable(table) {
 		return nil, fmt.Errorf("tabel %s.%s: %w", schemaName, table, dbms.ErrNotFound)
 	}
 	reg := pgx.Identifier{schemaName, table}.Sanitize()
