@@ -14,6 +14,8 @@ type Config struct {
 	SecretKey   string `env:"DBMP_SECRET_KEY,required"`
 	CSRFKey     string `env:"CSRF_KEY,required"`
 	Session     Session
+	// TracesExporter memakai nama variabel standar OpenTelemetry: console (default) atau none.
+	TracesExporter string `env:"OTEL_TRACES_EXPORTER" envDefault:"console"`
 }
 
 type Session struct {

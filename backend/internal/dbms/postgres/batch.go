@@ -131,12 +131,6 @@ func prepareBatchRun(ctx context.Context, q rowQuerier, in dbms.BatchApplyInput)
 			r.Table != in.Batch.Table || r.KeyColumn != in.Batch.KeyColumn {
 			return nil, dbms.ErrBatchScopeMismatch
 		}
-		if r.Size != in.Batch.Size {
-			if _, err = q.Exec(ctx, `UPDATE _dbmp_batch_run SET batch_size = $2 WHERE run_id = $1`, in.RunID, in.Batch.Size); err != nil {
-				return nil, err
-			}
-			r.Size = in.Batch.Size
-		}
 		return r, nil
 	}
 	if !errors.Is(err, dbms.ErrBatchRunUnknown) {

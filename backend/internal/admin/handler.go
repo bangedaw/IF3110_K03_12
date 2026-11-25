@@ -31,6 +31,7 @@ func Routes(r chi.Router, s *Service) {
 	r.Delete("/admin/groups/{groupId}", handle(s.handleDeleteGroup))
 	r.Put("/admin/groups/{groupId}/members/{userId}", handle(s.handleAddMember))
 	r.Delete("/admin/groups/{groupId}/members/{userId}", handle(s.handleRemoveMember))
+	r.Put("/admin/groups/{groupId}/leader", handle(s.handleSetLeader))
 	r.Get("/admin/groups/{groupId}/grants", handle(s.handleListGrants))
 	r.Put("/admin/groups/{groupId}/grants/{databaseId}", handle(s.handlePutGrant))
 	r.Delete("/admin/groups/{groupId}/grants/{databaseId}", handle(s.handleDeleteGrant))
@@ -197,6 +198,19 @@ func (s *Service) handleRemoveMember(_ http.ResponseWriter, r *http.Request, p a
 		return 0, nil, err
 	}
 	return http.StatusNoContent, nil, s.RemoveMember(r.Context(), p, groupID, userID)
+}
+
+func (s *Service) handleSetLeader(w http.ResponseWriter, r *http.Request, p authz.Principal) (int, any, error) {
+	id, err := pathID(r, "groupId")
+	if err != nil {
+		return 0, nil, err
+	}
+	var in apigen.GroupLeaderSet
+	if err := httpx.Decode(w, r, &in); err != nil {
+		return 0, nil, err
+	}
+	g, err := s.SetLeader(r.Context(), p, id, in.UserId)
+	return http.StatusOK, g, err
 }
 
 func (s *Service) handleListGrants(_ http.ResponseWriter, r *http.Request, p authz.Principal) (int, any, error) {

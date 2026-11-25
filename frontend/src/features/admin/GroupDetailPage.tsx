@@ -1,11 +1,11 @@
-import { useState } from "react"
+import { useState, type FormEvent } from "react"
 import { Link, useParams } from "react-router-dom"
 import { Button } from "@/components/ui/button"
-import { inputClass } from "@/components/ui/form"
+import { Field, inputClass } from "@/components/ui/form"
 import { ErrorState, Loading } from "@/components/ErrorState"
-import { errorMessage } from "@/features/shared/client"
+import { ApiError, errorMessage } from "@/features/shared/client"
 import { useConnections } from "@/features/connections/api"
-import { useGrants, useGroup, useSetGrant, useSetMember, useUsers, type AccessLevel } from "./api"
+import { useGrants, useGroup, useSetGrant, useSetLeader, useSetMember, useUpdateGroup, useUsers, type AccessLevel } from "./api"
 
 export function GroupDetailPage() {
   const groupId = Number(useParams().groupId)
@@ -15,7 +15,9 @@ export function GroupDetailPage() {
   const connections = useConnections()
   const setMember = useSetMember(groupId)
   const setGrant = useSetGrant(groupId)
+  const setLeader = useSetLeader(groupId)
   const [newMember, setNewMember] = useState("")
+  const [editing, setEditing] = useState(false)
   const [actionError, setActionError] = useState("")
 
   async function run(action: () => Promise<unknown>) {
@@ -37,8 +39,29 @@ export function GroupDetailPage() {
         <Link to="/admin/groups" className="text-sm text-muted-foreground hover:underline">
           ← Groups
         </Link>
-        <h1 className="text-xl font-semibold">{group.data.name}</h1>
-        {group.data.description && <p className="text-sm text-muted-foreground">{group.data.description}</p>}
+        {editing ? (
+          <GroupEditForm groupId={groupId} name={group.data.name} description={group.data.description} onDone={() => setEditing(false)} />
+        ) : (
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <h1 className="text-xl font-semibold">{group.data.name}</h1>
+              {group.data.description && <p className="text-sm text-muted-foreground">{group.data.description}</p>}
+            </div>
+            <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+              Ubah nama
+            </Button>
+          </div>
+        )}
+        {group.data.leaderUsername ? (
+          <p className="text-sm">
+            Leader: <span className="font-medium">{group.data.leaderUsername}</span>
+          </p>
+        ) : (
+          <p role="status" className="rounded-lg border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            Group ini belum punya leader. Migration pada database yang bisa diakses group ini tertahan di Pending Review sampai leader
+            ditunjuk dari daftar anggota di bawah.
+          </p>
+        )}
       </div>
 
       {actionError && (
@@ -49,7 +72,7 @@ export function GroupDetailPage() {
 
       <section className="space-y-2">
         <h2 className="font-medium">Anggota</h2>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <select
             aria-label="Pilih user"
             className={inputClass + " max-w-xs"}
@@ -74,16 +97,34 @@ export function GroupDetailPage() {
           <p className="text-sm text-muted-foreground">Belum ada anggota.</p>
         ) : (
           <ul className="divide-y rounded-xl border">
-            {group.data.members.map((m) => (
-              <li key={m.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                <span>
-                  <span className="font-medium">{m.username}</span> {m.displayName && <span className="text-muted-foreground">({m.displayName})</span>}
-                </span>
-                <Button size="sm" variant="outline" onClick={() => void run(() => setMember.mutateAsync({ userId: m.id, member: false }))}>
-                  Keluarkan
-                </Button>
-              </li>
-            ))}
+            {group.data.members.map((m) => {
+              const isLeader = m.id === group.data.leaderId
+              return (
+                <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm">
+                  <span>
+                    <span className="font-medium">{m.username}</span> {m.displayName && <span className="text-muted-foreground">({m.displayName})</span>}
+                    {isLeader && <span className="ml-2 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary">Leader</span>}
+                    {!m.isActive && <span className="ml-2 text-xs text-muted-foreground">nonaktif</span>}
+                  </span>
+                  <span className="flex gap-2">
+                    {!isLeader && m.isActive && (
+                      <Button size="sm" variant="outline" disabled={setLeader.isPending} onClick={() => void run(() => setLeader.mutateAsync(m.id))}>
+                        Jadikan leader
+                      </Button>
+                    )}
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={isLeader}
+                      title={isLeader ? "Tunjuk leader lain sebelum mengeluarkan leader" : undefined}
+                      onClick={() => void run(() => setMember.mutateAsync({ userId: m.id, member: false }))}
+                    >
+                      Keluarkan
+                    </Button>
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         )}
       </section>
@@ -125,5 +166,50 @@ export function GroupDetailPage() {
         )}
       </section>
     </div>
+  )
+}
+
+function GroupEditForm({ groupId, name, description, onDone }: { groupId: number; name: string; description: string; onDone: () => void }) {
+  const update = useUpdateGroup(groupId)
+  const [draftName, setDraftName] = useState(name)
+  const [draftDescription, setDraftDescription] = useState(description)
+  const [fields, setFields] = useState<Record<string, string>>({})
+  const [error, setError] = useState("")
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setFields({})
+    setError("")
+    try {
+      await update.mutateAsync({ name: draftName, description: draftDescription })
+      onDone()
+    } catch (err) {
+      if (err instanceof ApiError) setFields(err.fields)
+      setError(errorMessage(err))
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void submit(e)} className="mt-2 grid gap-3 rounded-xl border p-4 sm:grid-cols-[1fr_2fr]">
+      <Field label="Nama group" htmlFor="edit-group-name" error={fields.name}>
+        <input id="edit-group-name" className={inputClass} value={draftName} onChange={(e) => setDraftName(e.target.value)} required />
+      </Field>
+      <Field label="Deskripsi" htmlFor="edit-group-description" error={fields.description}>
+        <input id="edit-group-description" className={inputClass} value={draftDescription} onChange={(e) => setDraftDescription(e.target.value)} />
+      </Field>
+      {error && (
+        <p role="alert" className="text-sm text-destructive sm:col-span-2">
+          {error}
+        </p>
+      )}
+      <div className="flex gap-2 sm:col-span-2">
+        <Button type="submit" disabled={update.isPending}>
+          Simpan
+        </Button>
+        <Button type="button" variant="outline" onClick={onDone}>
+          Batal
+        </Button>
+      </div>
+    </form>
   )
 }

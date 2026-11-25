@@ -50,7 +50,7 @@ type Store interface {
 }
 
 // pgStore: implementasi Postgres dengan SQL langsung (tabel dan kolom ada di
-// 00003_migration_workflow.sql). Tidak memakai kode sqlc agar tidak bentrok
+// 00005_migration_workflow.sql). Tidak memakai kode sqlc agar tidak bentrok
 // dengan query M1 (GetMigration, ListMigrations) di paket gen.
 type pgStore struct {
 	pool    *pgxpool.Pool

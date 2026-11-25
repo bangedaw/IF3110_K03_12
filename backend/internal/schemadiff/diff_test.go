@@ -283,3 +283,21 @@ func withIndex(t schema.Table, is ...schema.Index) schema.Table {
 	t.Indexes = append(t.Indexes, is...)
 	return t
 }
+
+func TestDiff_IgnoresInternalTables(t *testing.T) {
+	books := tbl("books", col("id", "bigint"))
+	history := tbl("_dbmp_schema_history", col("run_id", "bigint"))
+	checkpoint := tbl("_dbmp_batch_checkpoint", col("run_id", "bigint"))
+
+	if cs := Diff(mdl(books, history, checkpoint), mdl(books)); len(cs) != 0 {
+		t.Fatalf("tabel internal tidak boleh di-drop, dapat %v", cs)
+	}
+	if cs := Diff(mdl(books), mdl(books, history)); len(cs) != 0 {
+		t.Fatalf("tabel internal tidak boleh dibuat, dapat %v", cs)
+	}
+	changed := tbl("_dbmp_schema_history", col("run_id", "bigint"), col("direction", "text"))
+	if cs := Diff(mdl(books, history), mdl(books, changed)); len(cs) != 0 {
+		t.Fatalf("perubahan tabel internal tidak boleh dibandingkan, dapat %v", cs)
+	}
+	assertKinds(t, Diff(mdl(history), mdl(history, books)), KindAddTable)
+}

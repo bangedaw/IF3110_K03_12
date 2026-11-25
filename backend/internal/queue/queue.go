@@ -45,4 +45,7 @@ type FinishInput struct {
 type Lifecycle interface {
 	Start(ctx context.Context, in StartInput) (*Execution, error)
 	Finish(ctx context.Context, in FinishInput) error
+	// Interrupted mengembalikan eksekusi attempt ke-attempt dari job yang run-nya masih running, dipakai
+	// pemulihan setelah worker mati. Hasilnya nil jika attempt itu belum sempat membuat run.
+	Interrupted(ctx context.Context, jobID int64, attempt int) (*Execution, error)
 }

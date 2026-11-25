@@ -270,7 +270,13 @@ func tablesBySchema(m *schema.Model) map[string][]schema.Table {
 		return out
 	}
 	for _, s := range m.Schemas {
-		out[s.Name] = s.Tables
+		tables := make([]schema.Table, 0, len(s.Tables))
+		for _, t := range s.Tables {
+			if !schema.IsInternalTable(t.Name) {
+				tables = append(tables, t)
+			}
+		}
+		out[s.Name] = tables
 	}
 	return out
 }

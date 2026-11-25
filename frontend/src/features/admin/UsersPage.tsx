@@ -14,6 +14,7 @@ export function UsersPage() {
   const revoke = useRevokeSessions()
   const [creating, setCreating] = useState(false)
   const [resetting, setResetting] = useState<number | null>(null)
+  const [renaming, setRenaming] = useState<number | null>(null)
   const [notice, setNotice] = useState("")
   const [actionError, setActionError] = useState("")
 
@@ -35,7 +36,7 @@ export function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 className="text-xl font-semibold">Users</h1>
           <p className="text-sm text-muted-foreground">Akses database diberikan lewat group, bukan langsung ke user.</p>
@@ -102,6 +103,9 @@ export function UsersPage() {
                         >
                           {u.isPlatformAdmin ? "Cabut admin" : "Jadikan admin"}
                         </Button>
+                        <Button size="sm" variant="outline" onClick={() => setRenaming(renaming === u.id ? null : u.id)}>
+                          Ubah nama
+                        </Button>
                         <Button size="sm" variant="outline" onClick={() => setResetting(resetting === u.id ? null : u.id)}>
                           Reset password
                         </Button>
@@ -112,6 +116,15 @@ export function UsersPage() {
                           Hapus
                         </Button>
                       </div>
+                      {renaming === u.id && (
+                        <DisplayNameForm
+                          user={u}
+                          onDone={(msg) => {
+                            setRenaming(null)
+                            setNotice(msg)
+                          }}
+                        />
+                      )}
                       {resetting === u.id && (
                         <ResetPasswordForm
                           user={u}
@@ -225,6 +238,34 @@ function ResetPasswordForm({ user, onDone }: { user: User; onDone: (msg: string)
         />
       </Field>
       <Button type="submit" size="sm" className="mt-6" disabled={reset.isPending}>
+        Simpan
+      </Button>
+    </form>
+  )
+}
+
+function DisplayNameForm({ user, onDone }: { user: User; onDone: (msg: string) => void }) {
+  const update = useUpdateUser()
+  const [displayName, setDisplayName] = useState(user.displayName)
+  const [error, setError] = useState("")
+
+  async function submit(e: FormEvent) {
+    e.preventDefault()
+    setError("")
+    try {
+      await update.mutateAsync({ id: user.id, body: { displayName } })
+      onDone(`Nama ${user.username} diperbarui`)
+    } catch (err) {
+      setError(errorMessage(err))
+    }
+  }
+
+  return (
+    <form onSubmit={(e) => void submit(e)} className="mt-2 flex items-start justify-end gap-2">
+      <Field label={`Nama tampilan ${user.username}`} htmlFor={`rename-${user.id}`} error={error}>
+        <input id={`rename-${user.id}`} className={inputClass} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+      </Field>
+      <Button type="submit" size="sm" className="mt-6" disabled={update.isPending}>
         Simpan
       </Button>
     </form>
