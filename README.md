@@ -158,6 +158,42 @@ Contoh log saat membuka data tabel di explorer:
 {"time":"2026-11-17T03:15:53.058+07:00","level":"INFO","msg":"sql.query.end","event":"sql.query","target":"target","database":"inventory","server":"localhost:5433","actor":2,"request_id":"arch/nUR1aEmLhS-000002","query":"SELECT \"id\"::text, … FROM \"inventory\".\"products\" ORDER BY \"inventory\".\"products\".\"id\" ASC LIMIT 2 OFFSET 0","duration_ms":17.774,"rows":2,"status":"ok"}
 ```
 
+## Migration: workflow, approval, dan riwayat
+
+Kode: `backend/internal/migration`, UI: `frontend/src/features/migrations`, API: `api/openapi.yaml` (tag `migrations`).
+
+**Definisi.** Satu migration punya SQL up dan SQL down, atau ditandai *irreversible* beserta alasannya. Mode batch
+(opsional) menyimpan kolom dan ukuran batch. Setiap perubahan draft menaikkan `revision`. Setelah migration pernah
+dieksekusi, `sqlLocked` menjadi `true` dan SQL tidak bisa diubah lagi; buat migration baru.
+
+**Status.** `draft` → `pending_review` → `approved` → `pending_queue` → `running` → `success` atau `failed`.
+Perpindahan di luar jalur ini ditolak (409). Penolakan dari satu leader mengembalikan migration ke `draft`.
+
+**Approval.** Yang wajib menyetujui adalah leader setiap group yang punya akses ke database (View Only maupun
+View + Edit); satu leader yang memimpin beberapa group dihitung satu suara. Hanya leader itu yang boleh memutuskan
+(selain itu 403). Job baru dipublikasikan ke queue setelah semua leader setuju. Rollback dan forward memakai putaran
+approval sendiri dengan aturan yang sama. Keputusan sementara (belum dijawab di Q&A): approval leader pengaju tetap
+dihitung, dan group tanpa leader aktif tidak menghasilkan approver; bila tidak ada approver sama sekali, pengajuan ditolak.
+
+**Aturan eksekusi.** Apply mengikuti urutan linear (`seq`). Rollback hanya untuk migration aktif terakhir dan bukan
+irreversible. Forward menjalankan migration berikutnya menurut urutan, satu per pengajuan. Rollback yang gagal tidak
+mengubah posisi aktif. Aturan yang sama diperiksa ulang oleh worker sebelum eksekusi (`Revalidate`).
+
+**Riwayat.** `migration_executions` menyimpan satu baris per attempt, berhasil maupun gagal, lengkap dengan revisi,
+pengguna, waktu, status, jenis, dan salinan SQL yang dijalankan. Rollback sukses merujuk execution yang dibatalkan.
+Baris final tidak bisa diubah (trigger di database) dan tidak pernah dihapus oleh kode. Setiap baris juga ditulis ke
+log aplikasi (`migration.execution.*`; SQL hanya dicatat sebagai hash dan panjang). `GET .../migration-history?hideRollback=true`
+menyembunyikan pasangan (execution yang dibatalkan, rollback suksesnya); attempt gagal tetap tampil.
+
+| Endpoint | Fungsi |
+|---|---|
+| `GET/POST /api/databases/{id}/migrations` | daftar / buat draft |
+| `GET/PUT /api/migrations/{id}` | detail / ubah draft |
+| `POST /api/migrations/{id}/submit` | ajukan review |
+| `GET/POST /api/migrations/{id}/approvals` | daftar approver / setuju atau tolak |
+| `POST /api/migrations/{id}/rollback`, `/forward` | ajukan rollback / forward |
+| `GET /api/databases/{id}/migration-history` | riwayat eksekusi |
+
 ## Build satu binary (demo/production)
 
 ```bash

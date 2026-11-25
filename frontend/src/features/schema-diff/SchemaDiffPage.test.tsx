@@ -79,7 +79,7 @@ describe("SchemaDiffPage", () => {
     await user.click(screen.getByRole("button", { name: "Simpan sebagai draft migration" }))
 
     expect(await screen.findByText(/Draft #9 tersimpan/)).toBeInTheDocument()
-    expect(body).toMatchObject({ title: "Sinkronkan inventory dengan staging", sql: sampleDiff.sql })
+    expect(body).toMatchObject({ title: "Sinkronkan inventory dengan staging", upSql: sampleDiff.sql })
     expect(screen.getByRole("link", { name: "Buka Migrations" })).toHaveAttribute("href", "/databases/1/migrations")
   })
 

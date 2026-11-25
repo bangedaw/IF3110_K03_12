@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { client, postUntyped, unwrap } from "@/features/shared/client"
+import { client, unwrap } from "@/features/shared/client"
 import type { DiffAgainst } from "@/features/shared/types"
 
 export interface MigrationDraftInput {
@@ -38,7 +38,20 @@ export function useSchemaDiff(databaseId: number) {
 
 export function useSaveMigrationDraft(databaseId: number) {
   return useMutation({
+    // Hasil diff hanya punya SQL up, jadi draft ditandai irreversible sampai SQL down diisi di editor.
     mutationFn: (input: MigrationDraftInput) =>
-      postUntyped<{ id: number }>(`/api/databases/${databaseId}/migrations`, input),
+      unwrap(
+        client.POST("/api/databases/{databaseId}/migrations", {
+          params: { path: { databaseId } },
+          body: {
+            title: input.title,
+            description: input.description,
+            upSql: input.sql,
+            downSql: "",
+            irreversible: true,
+            irreversibleReason: "Dihasilkan dari schema diff; belum ada SQL down",
+          },
+        }),
+      ),
   })
 }
