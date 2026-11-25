@@ -60,6 +60,7 @@ SPA (React + react-query)  →  handler (JSON)  →  service (logika + authz)  �
 | Paket | Isi | Pemilik |
 |---|---|---|
 | `cmd/server` | entrypoint, wiring semua domain | Miguel |
+| `cmd/worker` | proses worker: mengambil job, lock, eksekusi, pemulihan | Miguel |
 | `cmd/dbmpctl` | CLI `create-admin` dan `seed-demo` | Miguel |
 | `internal/config` | env var → struct | Miguel |
 | `internal/httpx`, `internal/apperr` | router, middleware umum, Problem Details, pagination | Miguel |
@@ -68,14 +69,14 @@ SPA (React + react-query)  →  handler (JSON)  →  service (logika + authz)  �
 | `internal/authz` | daftar aksi, policy, level efektif multi-group | Miguel |
 | `internal/admin` | API user, group, anggota, grant | Miguel |
 | `internal/audit` | audit log + pencatat penolakan authz | Miguel |
-| `internal/queue` | kontrak `Publisher` dan `Lifecycle` (Milestone 2) | Miguel |
+| `internal/queue` | job, worker, lock per database, retry, pemulihan; kontrak `Publisher` dan `Lifecycle` | Miguel |
 | `internal/spa` | menyajikan SPA ter-embed, fallback `index.html` untuk deep link | Edo |
 | `internal/secret` | AES-256-GCM untuk password database target | Edo |
 | `internal/sqltrace` | log dan span untuk setiap query ke platform DB dan database target | Edo |
 | `internal/dbms` | interface driver, eksekusi up/down dan per batch, implementasi PostgreSQL dan MySQL | Edo, Rhino |
 | `internal/dbconn` | CRUD koneksi, test koneksi, registry pool per database | Edo |
 | `internal/schema`, `internal/explorer`, `internal/schemadiff` | introspeksi, viewer, snapshot, diff | Edo |
-| `internal/migration` | draft, eksekusi transaksional, riwayat, reconciler | Rhino |
+| `internal/migration` | draft, request dan approval, aturan rollback/forward, `Lifecycle`, riwayat | Rhino |
 | `internal/sqlsplit` | pemecah dan validator statement SQL; dipakai `migration` dan driver `dbms` | Rhino |
 
 ## Frontend
@@ -97,10 +98,10 @@ SPA (React + react-query)  →  handler (JSON)  →  service (logika + authz)  �
 
 ## Build dan deploy
 
-- **Dev:** `make dev` (container DB), `make run` (API :8080), dan `make web-dev` (Vite :5173 dengan hot
+- **Dev:** `make dev` (container DB), `make run` (API :8080), `make run-worker` (worker), dan `make web-dev` (Vite :5173 dengan hot
   reload, `/api` diteruskan ke :8080).
 - **Demo/production:** `make build` mem-build SPA, menyalinnya ke `backend/internal/spa/dist`, lalu
-  membuat `bin/dbmp` dengan SPA ter-embed (`embed.FS`); satu port, satu origin. Aset di `assets/`
+  membuat `bin/dbmp` (dan `bin/dbmp-worker`) dengan SPA ter-embed (`embed.FS`); satu port, satu origin. Aset di `assets/`
   di-cache permanen, `index.html` memakai `Cache-Control: no-cache`. Set `APP_ENV=production` di belakang
   HTTPS agar cookie memakai `Secure`.
 
@@ -143,9 +144,9 @@ POST /api/databases/{databaseId}/...        span server (httpx.Trace)
 - `trace_context` di job hanya berisi `traceparent`. Baggage dari client tidak ikut tersimpan.
 - Pemulihan membuat span `queue.recover` di trace asal job tersebut.
 - `TestOneTraceSpansFromAPIRequestToSQLInWorker` (paket `queue`) menguji rantai ini.
-- `cmd/worker` belum ada. Saat dibuat, binary itu harus memanggil `telemetry.Setup` dengan `service.name`
-  `dbmp-worker`, memakai `telemetry.NewHandler` untuk log, dan memasang `sqltrace.Tracer` di pool platform
-  DB maupun koneksi target, supaya span SQL di worker ikut tercatat.
+- `cmd/worker` memakai `service.name` `dbmp-worker`, handler log yang sama dengan server, dan
+  `sqltrace.Tracer` di pool platform DB maupun koneksi target. Jumlah job paralel per proses diatur
+  `WORKER_CONCURRENCY` (default 4); beberapa proses worker boleh berjalan bersamaan.
 
 ### Atribut log
 

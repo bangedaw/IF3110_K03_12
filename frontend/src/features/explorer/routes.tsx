@@ -1,4 +1,5 @@
 import type { RouteObject } from "react-router-dom"
+import { migrationRoutes } from "@/features/migrations/routes"
 import { SchemaDiffPage } from "@/features/schema-diff/SchemaDiffPage"
 import { DatabaseLayout, ExplorerHome } from "./DatabaseLayout"
 import { DatabaseListPage } from "./DatabaseListPage"
@@ -13,6 +14,7 @@ export const explorerRoutes: RouteObject[] = [
       { index: true, element: <ExplorerHome /> },
       { path: "schemas/:schema/tables/:table", element: <TableView /> },
       { path: "diff", element: <SchemaDiffPage /> },
+      ...migrationRoutes,
     ],
   },
 ]

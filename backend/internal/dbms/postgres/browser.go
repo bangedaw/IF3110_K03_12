@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -34,10 +33,7 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 	if excludedSchema(q.Schema) || schema.IsInternalTable(q.Table) {
 		return nil, dbms.ErrNotFound
 	}
-	limit, offset, err := normalizePage(q)
-	if err != nil {
-		return nil, err
-	}
+	limit, offset := normalizePage(q)
 	reg := pgx.Identifier{q.Schema, q.Table}.Sanitize()
 
 	tx, err := b.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
@@ -63,11 +59,8 @@ func (b *Browser) Rows(ctx context.Context, q dbms.RowsQuery) (*dbms.RowsPage, e
 	if len(cols) == 0 {
 		return nil, dbms.ErrNotFound
 	}
-	if q.OrderBy != "" && !slices.Contains(cols, q.OrderBy) {
-		return nil, fmt.Errorf("%w: kolom urut tidak valid", dbms.ErrInvalidQuery)
-	}
 
-	query := rowsSQL(reg, cols, q, limit, offset)
+	query := rowsSQL(reg, cols, limit, offset)
 	rows, err := tx.Query(ctx, query)
 	if err != nil {
 		return nil, rowsError(err)
@@ -139,28 +132,21 @@ func attributeNames(ctx context.Context, tx pgx.Tx, reg string) ([]string, error
 	return cols, rows.Err()
 }
 
-func rowsSQL(reg string, cols []string, q dbms.RowsQuery, limit, offset int) string {
+func rowsSQL(reg string, cols []string, limit, offset int) string {
 	quoted := make([]string, len(cols))
 	for i, c := range cols {
 		quoted[i] = pgx.Identifier{c}.Sanitize() + "::text"
 	}
 
 	orderBy := reg + "." + pgx.Identifier{cols[0]}.Sanitize()
-	if q.OrderBy != "" {
-		orderBy = reg + "." + pgx.Identifier{q.OrderBy}.Sanitize()
-	}
-	dir := "ASC"
-	if strings.EqualFold(q.OrderDir, "desc") {
-		dir = "DESC"
-	}
 	query := fmt.Sprintf(
-		"SELECT %s FROM %s ORDER BY %s %s LIMIT %d OFFSET %d",
-		strings.Join(quoted, ", "), reg, orderBy, dir, limit, offset,
+		"SELECT %s FROM %s ORDER BY %s LIMIT %d OFFSET %d",
+		strings.Join(quoted, ", "), reg, orderBy, limit, offset,
 	)
 	return query
 }
 
-func normalizePage(q dbms.RowsQuery) (limit, offset int, err error) {
+func normalizePage(q dbms.RowsQuery) (limit, offset int) {
 	limit = q.Limit
 	if limit <= 0 {
 		limit = defaultRowsLimit
@@ -172,12 +158,7 @@ func normalizePage(q dbms.RowsQuery) (limit, offset int, err error) {
 	if offset < 0 {
 		offset = 0
 	}
-	switch strings.ToLower(q.OrderDir) {
-	case "", "asc", "desc":
-	default:
-		return 0, 0, fmt.Errorf("%w: arah urut tidak valid", dbms.ErrInvalidQuery)
-	}
-	return limit, offset, nil
+	return limit, offset
 }
 
 func cellOf(v any) dbms.Cell {

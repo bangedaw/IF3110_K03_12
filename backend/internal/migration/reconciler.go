@@ -3,17 +3,17 @@ package migration
 import (
 	"context"
 	"log/slog"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 )
 
 const reconciledFailure = "server berhenti sebelum eksekusi selesai; perubahan tidak ditemukan di database target sehingga dianggap di-rollback"
 
-type ReconcileRepository interface {
-	RunningRuns(ctx context.Context) ([]Run, error)
-	FinishRun(ctx context.Context, runID int64, status Status, version *int, errCode, errMessage string, failedIndex *int) (*Run, error)
-}
-
 type Reconciler struct {
-	Repo    ReconcileRepository
+	Pool    *pgxpool.Pool
 	Targets TargetRegistry
 	Logger  *slog.Logger
 }
@@ -23,7 +23,7 @@ func (r Reconciler) Reconcile(ctx context.Context) error {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	runs, err := r.Repo.RunningRuns(ctx)
+	runs, err := gen.New(r.Pool).ListRunningMigrationRuns(ctx)
 	if err != nil {
 		return err
 	}
@@ -38,15 +38,27 @@ func (r Reconciler) Reconcile(ctx context.Context) error {
 			logger.WarnContext(ctx, "reconcile: riwayat target tidak terbaca, run dibiarkan running", "run_id", run.ID, "err", err)
 			continue
 		}
-		if found {
-			_, err = r.Repo.FinishRun(ctx, run.ID, RunSucceeded, &version, "", "", nil)
-		} else {
-			_, err = r.Repo.FinishRun(ctx, run.ID, RunFailed, nil, "RECONCILED", reconciledFailure, nil)
-		}
-		if err != nil {
+		if err := r.finish(ctx, run, version, found); err != nil {
 			return err
 		}
 		logger.InfoContext(ctx, "reconcile: run diselesaikan", "run_id", run.ID, "committed", found)
 	}
 	return nil
+}
+
+func (r Reconciler) finish(ctx context.Context, run gen.ListRunningMigrationRunsRow, version int, found bool) error {
+	return pgx.BeginFunc(ctx, r.Pool, func(tx pgx.Tx) error {
+		q := gen.New(tx)
+		if !found {
+			return q.FinishRun(ctx, gen.FinishRunParams{
+				ID: run.ID, Status: gen.RunStatusFailed, ErrorCode: text("RECONCILED"), ErrorMessage: text(reconciledFailure),
+			})
+		}
+		if err := q.FinishRun(ctx, gen.FinishRunParams{ID: run.ID, Status: gen.RunStatusSucceeded}); err != nil {
+			return err
+		}
+		return q.MarkMigrationApplied(ctx, gen.MarkMigrationAppliedParams{
+			ID: run.MigrationID, Version: int4of(int32(version)), AppliedBy: int8of(run.ExecutedBy),
+		})
+	})
 }

@@ -1247,9 +1247,6 @@ export interface paths {
             query?: {
                 limit?: components["parameters"]["Limit"];
                 offset?: components["parameters"]["Offset"];
-                /** @description Harus salah satu nama kolom tabel (ditolak driver bila bukan) */
-                orderBy?: components["parameters"]["OrderBy"];
-                orderDir?: components["parameters"]["OrderDir"];
             };
             header?: never;
             path: {
@@ -1265,9 +1262,6 @@ export interface paths {
                 query?: {
                     limit?: components["parameters"]["Limit"];
                     offset?: components["parameters"]["Offset"];
-                    /** @description Harus salah satu nama kolom tabel (ditolak driver bila bukan) */
-                    orderBy?: components["parameters"]["OrderBy"];
-                    orderDir?: components["parameters"]["OrderDir"];
                 };
                 header?: never;
                 path: {
@@ -1291,7 +1285,6 @@ export interface paths {
                 401: components["responses"]["Unauthenticated"];
                 403: components["responses"]["Forbidden"];
                 404: components["responses"]["NotFound"];
-                422: components["responses"]["ValidationFailed"];
                 503: components["responses"]["DBUnreachable"];
             };
         };
@@ -1517,6 +1510,528 @@ export interface paths {
                         "application/problem+json": components["schemas"]["Problem"];
                     };
                 };
+                503: components["responses"]["DBUnreachable"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/databases/{databaseId}/migrations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                databaseId: components["parameters"]["DatabaseId"];
+            };
+            cookie?: never;
+        };
+        /** Daftar migration database, terbaru lebih dulu (View Only cukup) */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    databaseId: components["parameters"]["DatabaseId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Migration"][];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        /** Buat migration draft (butuh View + Edit) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    databaseId: components["parameters"]["DatabaseId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MigrationDefinition"];
+                };
+            };
+            responses: {
+                /** @description Created */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Migration"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                422: components["responses"]["ValidationFailed"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/databases/{databaseId}/migration-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                databaseId: components["parameters"]["DatabaseId"];
+            };
+            cookie?: never;
+        };
+        /** Riwayat eksekusi, satu baris per attempt (berhasil dan gagal), terbaru lebih dulu */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Sembunyikan pasangan eksekusi yang dibatalkan dan rollback sukses yang membatalkannya. Attempt gagal tetap tampil. */
+                    hideRollback?: boolean;
+                    migrationId?: number;
+                };
+                header?: never;
+                path: {
+                    databaseId: components["parameters"]["DatabaseId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MigrationExecution"][];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/migrations/{migrationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                migrationId: components["parameters"]["MigrationId"];
+            };
+            cookie?: never;
+        };
+        /** Detail migration */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Migration"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        /** Ubah draft (revisi naik); SQL yang pernah dieksekusi tidak bisa diubah */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MigrationUpdate"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Migration"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+                422: components["responses"]["ValidationFailed"];
+            };
+        };
+        post?: never;
+        /** Hapus draft yang belum pernah dieksekusi */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description No Content */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/migrations/{migrationId}/submit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                migrationId: components["parameters"]["MigrationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ajukan penerapan draft ke review */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Request approval dibuat */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Migration"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/migrations/{migrationId}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                migrationId: components["parameters"]["MigrationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ajukan rollback (migration aktif terakhir, atau batch yang masih partial) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Request approval dibuat */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Migration"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/migrations/{migrationId}/forward": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                migrationId: components["parameters"]["MigrationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Ajukan forward (migration yang paling akhir di-rollback) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Request approval dibuat */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Migration"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/migrations/{migrationId}/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                migrationId: components["parameters"]["MigrationId"];
+            };
+            cookie?: never;
+        };
+        /** Approval setiap group untuk request terakhir */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MigrationApprovals"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+            };
+        };
+        put?: never;
+        /** Setuju atau tolak sebagai leader group */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MigrationDecision"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Migration"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+                422: components["responses"]["ValidationFailed"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/migrations/{migrationId}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                migrationId: components["parameters"]["MigrationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Masukkan request yang sudah disetujui ke antrean
+         * @description Request yang gagal atau partial diantrekan ulang tanpa approval baru, batch dilanjutkan dari checkpoint.
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MigrationExecute"];
+                };
+            };
+            responses: {
+                /** @description Job dibuat atau diantrekan ulang */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MigrationJob"];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                409: components["responses"]["Conflict"];
+                422: components["responses"]["ValidationFailed"];
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/migrations/{migrationId}/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                migrationId: components["parameters"]["MigrationId"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** EXPLAIN SQL up di database target tanpa menyimpan perubahan (butuh View + Edit) */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    migrationId: components["parameters"]["MigrationId"];
+                };
+                cookie?: never;
+            };
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["MigrationExplain"];
+                };
+            };
+            responses: {
+                /** @description OK */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["MigrationPlan"][];
+                    };
+                };
+                401: components["responses"]["Unauthenticated"];
+                403: components["responses"]["Forbidden"];
+                404: components["responses"]["NotFound"];
+                422: components["responses"]["ValidationFailed"];
                 503: components["responses"]["DBUnreachable"];
             };
         };
@@ -1856,6 +2371,164 @@ export interface components {
              */
             runAfter?: string;
         };
+        /** @enum {string} */
+        MigrationKind: "apply" | "rollback" | "forward";
+        /**
+         * @description Status workflow dari request terakhir. draft berarti belum ada request untuk revisi ini.
+         * @enum {string}
+         */
+        MigrationStatus: "draft" | "pending_review" | "approved" | "rejected" | "queued" | "running" | "succeeded" | "failed" | "partial";
+        /**
+         * @description Posisi migration di riwayat linear database.
+         * @enum {string}
+         */
+        MigrationPosition: "draft" | "applied" | "rolled_back";
+        /** @enum {string} */
+        MigrationAction: "edit" | "delete" | "submit" | "execute" | "rollback" | "forward" | "explain";
+        MigrationBatch: {
+            schema: string;
+            table: string;
+            /** @description Kolom integer unik yang tidak berubah */
+            column: string;
+            size: number;
+        };
+        MigrationDefinition: {
+            title: string;
+            description?: string;
+            upSql: string;
+            /** @description Kosong jika irreversible */
+            downSql: string;
+            irreversible: boolean;
+            /** @description Wajib jika irreversible */
+            irreversibleReason: string;
+            batch?: components["schemas"]["MigrationBatch"];
+        };
+        MigrationUpdate: components["schemas"]["MigrationDefinition"] & {
+            /** @description Revisi yang dibaca pengguna sebelum mengubah */
+            revision: number;
+        };
+        MigrationRequest: {
+            /** Format: int64 */
+            id: number;
+            kind: components["schemas"]["MigrationKind"];
+            status: components["schemas"]["MigrationStatus"];
+            revision: number;
+            requestedByName: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: int64 */
+            jobId?: number;
+        };
+        Migration: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            databaseId: number;
+            title: string;
+            description: string;
+            status: components["schemas"]["MigrationStatus"];
+            position: components["schemas"]["MigrationPosition"];
+            /** @description Versi database setelah migration ini */
+            version?: number;
+            revision: number;
+            upSql: string;
+            downSql: string;
+            irreversible: boolean;
+            irreversibleReason: string;
+            batch?: components["schemas"]["MigrationBatch"];
+            /** @description true setelah pernah dieksekusi */
+            sqlLocked: boolean;
+            createdByName: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** Format: date-time */
+            updatedAt: string;
+            request?: components["schemas"]["MigrationRequest"];
+            /**
+             * Format: int64
+             * @description Request yang dijalankan oleh aksi execute
+             */
+            executableRequestId?: number;
+            /**
+             * Format: int64
+             * @description Job dari request terakhir yang tidak ditolak
+             */
+            jobId?: number;
+            /** @description Aksi yang saat ini sah untuk pengguna ini */
+            actions: components["schemas"]["MigrationAction"][];
+        };
+        MigrationExecution: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            migrationId: number;
+            migrationTitle: string;
+            version?: number;
+            revision: number;
+            kind: components["schemas"]["MigrationKind"];
+            /** @enum {string} */
+            status: "running" | "succeeded" | "failed";
+            attempt: number;
+            /** Format: int64 */
+            executedBy: number;
+            executedByName: string;
+            executedSql: string;
+            /** Format: int64 */
+            revertsExecutionId?: number;
+            /** Format: int64 */
+            jobId?: number;
+            /** @description SQLSTATE jika ada */
+            errorCode?: string;
+            errorMessage?: string;
+            /** Format: date-time */
+            startedAt: string;
+            /** Format: date-time */
+            finishedAt?: string;
+        };
+        /** @enum {string} */
+        MigrationApprovalDecision: "pending" | "approved" | "rejected";
+        MigrationApproval: {
+            /** Format: int64 */
+            groupId: number;
+            groupName: string;
+            /** @description Kosong jika group belum punya leader */
+            leaderName?: string;
+            decision: components["schemas"]["MigrationApprovalDecision"];
+            decidedByName?: string;
+            comment: string;
+            /** Format: date-time */
+            decidedAt?: string;
+        };
+        MigrationApprovals: {
+            request: components["schemas"]["MigrationRequest"];
+            groups: components["schemas"]["MigrationApproval"][];
+            canDecide: boolean;
+        };
+        MigrationDecision: {
+            /** Format: int64 */
+            requestId: number;
+            /** @enum {string} */
+            decision: "approved" | "rejected";
+            comment?: string;
+        };
+        MigrationExecute: {
+            /** Format: int64 */
+            requestId: number;
+        };
+        MigrationJob: {
+            /** Format: int64 */
+            jobId: number;
+        };
+        MigrationExplain: {
+            analyze: boolean;
+        };
+        MigrationPlan: {
+            index: number;
+            sql: string;
+            explainable: boolean;
+            notice?: string;
+            plan?: unknown;
+        };
         SchemaDiffRequest: {
             against: {
                 /** @enum {string} */
@@ -1954,9 +2627,7 @@ export interface components {
         DatabaseId: number;
         SchemaName: string;
         TableName: string;
-        /** @description Harus salah satu nama kolom tabel (ditolak driver bila bukan) */
-        OrderBy: string;
-        OrderDir: "asc" | "desc";
+        MigrationId: number;
         SnapshotId: number;
         JobId: number;
     };

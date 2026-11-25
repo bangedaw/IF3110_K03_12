@@ -65,12 +65,12 @@ func TestRowsPagination(t *testing.T) {
 	require.Equal(t, dbms.MaxRows, clamped.Limit)
 }
 
-func TestRowsOrderBy(t *testing.T) {
-	asc := booksRows(t, dbms.RowsQuery{Table: "books", OrderBy: "title", OrderDir: "asc", Limit: 1})
-	require.Equal(t, "Analitik Bisnis", asc.Rows[0][2].Value)
-
-	desc := booksRows(t, dbms.RowsQuery{Table: "books", OrderBy: "title", OrderDir: "desc", Limit: 1})
-	require.Equal(t, "Query Lanjutan", desc.Rows[0][2].Value)
+func TestRowsOrderedByFirstColumn(t *testing.T) {
+	first := booksRows(t, dbms.RowsQuery{Table: "books", Limit: 1})
+	last := booksRows(t, dbms.RowsQuery{Table: "books", Limit: 1, Offset: 11})
+	require.Equal(t, "id", first.Columns[0])
+	require.Equal(t, "1", first.Rows[0][0].Value)
+	require.Equal(t, "12", last.Rows[0][0].Value)
 }
 
 func TestRowsRejectsInjection(t *testing.T) {
@@ -79,13 +79,6 @@ func TestRowsRejectsInjection(t *testing.T) {
 	_, err := b.Rows(context.Background(), dbms.RowsQuery{Schema: "app", Table: `books"; DROP TABLE app.books; --`})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, dbms.ErrNotFound))
-
-	_, err = b.Rows(context.Background(), dbms.RowsQuery{Schema: "app", Table: "books", OrderBy: `title); DROP TABLE app.books; --`})
-	require.Error(t, err)
-	require.False(t, errors.Is(err, dbms.ErrNotFound), "orderBy bukan soal tidak ada, tapi ditolak")
-
-	_, err = b.Rows(context.Background(), dbms.RowsQuery{Schema: "app", Table: "books", OrderBy: "title", OrderDir: `asc; DROP TABLE app.books`})
-	require.Error(t, err)
 
 	page := booksRows(t, dbms.RowsQuery{Table: "books", Limit: 1})
 	require.Len(t, page.Rows, 1)

@@ -6,7 +6,7 @@ GOLANGCI_VERSION     := v2.5.0
 
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: gen lint run build web web-dev dev down seed reseed seed-large bench-update bench-batch check test test-race
+.PHONY: gen lint run run-worker build web web-dev dev down seed reseed seed-large bench-update bench-batch check test test-race
 
 dev:
 	$(COMPOSE) up -d --wait
@@ -58,6 +58,9 @@ lint:
 run:
 	cd backend && go run ./cmd/server
 
+run-worker:
+	cd backend && go run ./cmd/worker
+
 web:
 	cd frontend && npm ci && npm run build
 	find backend/internal/spa/dist -mindepth 1 ! -name .gitkeep -delete
@@ -67,4 +70,4 @@ web-dev:
 	cd frontend && npm run dev
 
 build: web
-	cd backend && go build -o ../bin/dbmp ./cmd/server && go build -o ../bin/dbmpctl ./cmd/dbmpctl
+	cd backend && go build -o ../bin/dbmp ./cmd/server && go build -o ../bin/dbmp-worker ./cmd/worker && go build -o ../bin/dbmpctl ./cmd/dbmpctl

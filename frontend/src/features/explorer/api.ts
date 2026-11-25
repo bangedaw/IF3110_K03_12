@@ -4,8 +4,6 @@ import { client, unwrap } from "@/features/shared/client"
 export interface RowsParams {
   limit: number
   offset: number
-  orderBy?: string
-  orderDir?: "asc" | "desc"
 }
 
 export function useDatabases() {
@@ -71,8 +69,6 @@ export function useRows(databaseId: number, schemaName: string, tableName: strin
             query: {
               limit: params.limit,
               offset: params.offset,
-              orderBy: params.orderBy,
-              orderDir: params.orderBy ? (params.orderDir ?? "asc") : undefined,
             },
           },
           signal,
