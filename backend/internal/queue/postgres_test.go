@@ -261,11 +261,11 @@ func TestGetReturnsJobOnlyForItsDatabase(t *testing.T) {
 
 	job, err := q.Get(ctx, databaseID, id)
 	require.NoError(t, err)
-	assert.Equal(t, apigen.Pending, job.Status)
+	assert.Equal(t, apigen.JobStatusPending, job.Status)
 	assert.Equal(t, 3, job.MaxAttempts)
 	assert.Nil(t, job.StartedAt)
 	assert.Nil(t, job.LastError)
-	assert.Equal(t, apigen.Apply, job.Kind)
+	assert.Equal(t, apigen.JobKindApply, job.Kind)
 	require.NotNil(t, job.RunAfter, "job pending memberi tahu kapan diambil worker")
 
 	_, err = q.Claim(ctx)

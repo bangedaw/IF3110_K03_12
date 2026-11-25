@@ -625,6 +625,230 @@ paths:
               schema: { $ref: '#/components/schemas/Problem' }
         '503': { $ref: '#/components/responses/DBUnreachable' }
 
+  /api/databases/{databaseId}/migrations:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    get:
+      tags: [migrations]
+      summary: Daftar migration database, terbaru lebih dulu (View Only cukup)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Migration' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [migrations]
+      summary: Buat migration draft (butuh View + Edit)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MigrationDefinition' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Migration' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/databases/{databaseId}/migration-history:
+    parameters:
+      - $ref: '#/components/parameters/DatabaseId'
+    get:
+      tags: [migrations]
+      summary: Riwayat eksekusi, satu baris per attempt (berhasil dan gagal), terbaru lebih dulu
+      parameters:
+        - name: hideRollback
+          in: query
+          description: Sembunyikan pasangan eksekusi yang dibatalkan dan rollback sukses yang membatalkannya. Attempt gagal tetap tampil.
+          schema: { type: boolean, default: false }
+        - name: migrationId
+          in: query
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/MigrationExecution' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/migrations/{migrationId}:
+    parameters:
+      - $ref: '#/components/parameters/MigrationId'
+    get:
+      tags: [migrations]
+      summary: Detail migration
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Migration' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [migrations]
+      summary: Ubah draft (revisi naik); SQL yang pernah dieksekusi tidak bisa diubah
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MigrationUpdate' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Migration' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    delete:
+      tags: [migrations]
+      summary: Hapus draft yang belum pernah dieksekusi
+      responses:
+        '204': { description: No Content }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/migrations/{migrationId}/submit:
+    parameters:
+      - $ref: '#/components/parameters/MigrationId'
+    post:
+      tags: [migrations]
+      summary: Ajukan penerapan draft ke review
+      responses:
+        '201':
+          description: Request approval dibuat
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Migration' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/migrations/{migrationId}/rollback:
+    parameters:
+      - $ref: '#/components/parameters/MigrationId'
+    post:
+      tags: [migrations]
+      summary: Ajukan rollback (migration aktif terakhir, atau batch yang masih partial)
+      responses:
+        '201':
+          description: Request approval dibuat
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Migration' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/migrations/{migrationId}/forward:
+    parameters:
+      - $ref: '#/components/parameters/MigrationId'
+    post:
+      tags: [migrations]
+      summary: Ajukan forward (migration yang paling akhir di-rollback)
+      responses:
+        '201':
+          description: Request approval dibuat
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Migration' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/migrations/{migrationId}/approvals:
+    parameters:
+      - $ref: '#/components/parameters/MigrationId'
+    get:
+      tags: [migrations]
+      summary: Approval setiap group untuk request terakhir
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationApprovals' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [migrations]
+      summary: Setuju atau tolak sebagai leader group
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MigrationDecision' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Migration' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/migrations/{migrationId}/execute:
+    parameters:
+      - $ref: '#/components/parameters/MigrationId'
+    post:
+      tags: [migrations]
+      summary: Masukkan request yang sudah disetujui ke antrean
+      description: Request yang gagal atau partial diantrekan ulang tanpa approval baru, batch dilanjutkan dari checkpoint.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MigrationExecute' }
+      responses:
+        '202':
+          description: Job dibuat atau diantrekan ulang
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MigrationJob' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/migrations/{migrationId}/explain:
+    parameters:
+      - $ref: '#/components/parameters/MigrationId'
+    post:
+      tags: [migrations]
+      summary: EXPLAIN SQL up di database target tanpa menyimpan perubahan (butuh View + Edit)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MigrationExplain' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/MigrationPlan' } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '503': { $ref: '#/components/responses/DBUnreachable' }
+
 components:
   securitySchemes:
     cookieAuth:
@@ -670,6 +894,11 @@ components:
       in: path
       required: true
       schema: { type: string, maxLength: 128 }
+    MigrationId:
+      name: migrationId
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
     SnapshotId:
       name: snapshotId
       in: path
@@ -1084,6 +1313,153 @@ components:
           type: string
           format: date-time
           description: Hanya ada saat status pending. Waktu paling cepat worker mengambil attempt berikutnya (jeda retry atau menunggu lock).
+
+    MigrationKind: { type: string, enum: [apply, rollback, forward] }
+    MigrationStatus:
+      type: string
+      enum: [draft, pending_review, approved, rejected, queued, running, succeeded, failed, partial]
+      description: Status workflow dari request terakhir. draft berarti belum ada request untuk revisi ini.
+    MigrationPosition:
+      type: string
+      enum: [draft, applied, rolled_back]
+      description: Posisi migration di riwayat linear database.
+    MigrationAction: { type: string, enum: [edit, delete, submit, execute, rollback, forward, explain] }
+    MigrationBatch:
+      type: object
+      required: [schema, table, column, size]
+      properties:
+        schema: { type: string, maxLength: 63 }
+        table: { type: string, maxLength: 63 }
+        column: { type: string, maxLength: 63, description: Kolom integer unik yang tidak berubah }
+        size: { type: integer, minimum: 1, maximum: 1000000 }
+    MigrationDefinition:
+      type: object
+      required: [title, upSql, downSql, irreversible, irreversibleReason]
+      properties:
+        title: { type: string, maxLength: 200 }
+        description: { type: string, maxLength: 2000 }
+        upSql: { type: string }
+        downSql: { type: string, description: Kosong jika irreversible }
+        irreversible: { type: boolean }
+        irreversibleReason: { type: string, maxLength: 2000, description: Wajib jika irreversible }
+        batch: { $ref: '#/components/schemas/MigrationBatch' }
+    MigrationUpdate:
+      allOf:
+        - $ref: '#/components/schemas/MigrationDefinition'
+        - type: object
+          required: [revision]
+          properties:
+            revision: { type: integer, description: Revisi yang dibaca pengguna sebelum mengubah }
+    MigrationRequest:
+      type: object
+      required: [id, kind, status, revision, requestedByName, createdAt]
+      properties:
+        id: { type: integer, format: int64 }
+        kind: { $ref: '#/components/schemas/MigrationKind' }
+        status: { $ref: '#/components/schemas/MigrationStatus' }
+        revision: { type: integer }
+        requestedByName: { type: string }
+        createdAt: { type: string, format: date-time }
+        jobId: { type: integer, format: int64 }
+    Migration:
+      type: object
+      required: [id, databaseId, title, description, status, position, revision, upSql, downSql, irreversible, irreversibleReason, sqlLocked, createdByName, createdAt, updatedAt, actions]
+      properties:
+        id: { type: integer, format: int64 }
+        databaseId: { type: integer, format: int64 }
+        title: { type: string }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/MigrationStatus' }
+        position: { $ref: '#/components/schemas/MigrationPosition' }
+        version: { type: integer, description: Versi database setelah migration ini, hanya ada saat applied }
+        revision: { type: integer }
+        upSql: { type: string }
+        downSql: { type: string }
+        irreversible: { type: boolean }
+        irreversibleReason: { type: string }
+        batch: { $ref: '#/components/schemas/MigrationBatch' }
+        sqlLocked: { type: boolean, description: true setelah pernah dieksekusi }
+        createdByName: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        request: { $ref: '#/components/schemas/MigrationRequest' }
+        executableRequestId: { type: integer, format: int64, description: Request yang dijalankan oleh aksi execute }
+        jobId: { type: integer, format: int64, description: Job dari request terakhir yang tidak ditolak }
+        actions:
+          type: array
+          items: { $ref: '#/components/schemas/MigrationAction' }
+          description: Aksi yang saat ini sah untuk pengguna ini
+    MigrationExecution:
+      type: object
+      required: [id, migrationId, migrationTitle, revision, kind, status, attempt, executedBy, executedByName, executedSql, startedAt]
+      properties:
+        id: { type: integer, format: int64 }
+        migrationId: { type: integer, format: int64 }
+        migrationTitle: { type: string }
+        version: { type: integer }
+        revision: { type: integer }
+        kind: { $ref: '#/components/schemas/MigrationKind' }
+        status: { type: string, enum: [running, succeeded, failed] }
+        attempt: { type: integer }
+        executedBy: { type: integer, format: int64 }
+        executedByName: { type: string }
+        executedSql: { type: string }
+        revertsExecutionId: { type: integer, format: int64 }
+        jobId: { type: integer, format: int64 }
+        errorCode: { type: string, description: SQLSTATE jika ada }
+        errorMessage: { type: string }
+        startedAt: { type: string, format: date-time }
+        finishedAt: { type: string, format: date-time }
+    MigrationApprovalDecision: { type: string, enum: [pending, approved, rejected] }
+    MigrationApproval:
+      type: object
+      required: [groupId, groupName, decision, comment]
+      properties:
+        groupId: { type: integer, format: int64 }
+        groupName: { type: string }
+        leaderName: { type: string, description: Kosong jika group belum punya leader }
+        decision: { $ref: '#/components/schemas/MigrationApprovalDecision' }
+        decidedByName: { type: string }
+        comment: { type: string }
+        decidedAt: { type: string, format: date-time }
+    MigrationApprovals:
+      type: object
+      required: [request, groups, canDecide]
+      properties:
+        request: { $ref: '#/components/schemas/MigrationRequest' }
+        groups: { type: array, items: { $ref: '#/components/schemas/MigrationApproval' } }
+        canDecide: { type: boolean }
+    MigrationDecision:
+      type: object
+      required: [requestId, decision]
+      properties:
+        requestId: { type: integer, format: int64 }
+        decision: { type: string, enum: [approved, rejected] }
+        comment: { type: string, maxLength: 2000 }
+    MigrationExecute:
+      type: object
+      required: [requestId]
+      properties:
+        requestId: { type: integer, format: int64 }
+    MigrationJob:
+      type: object
+      required: [jobId]
+      properties:
+        jobId: { type: integer, format: int64 }
+    MigrationExplain:
+      type: object
+      required: [analyze]
+      properties:
+        analyze: { type: boolean }
+    MigrationPlan:
+      type: object
+      required: [index, sql, explainable]
+      properties:
+        index: { type: integer }
+        sql: { type: string }
+        explainable: { type: boolean }
+        notice: { type: string }
+        plan: {}
 
     SchemaDiffRequest:
       type: object

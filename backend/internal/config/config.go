@@ -16,6 +16,8 @@ type Config struct {
 	Session     Session
 	// TracesExporter memakai nama variabel standar OpenTelemetry: console (default) atau none.
 	TracesExporter string `env:"OTEL_TRACES_EXPORTER" envDefault:"console"`
+
+	WorkerConcurrency int `env:"WORKER_CONCURRENCY" envDefault:"4"`
 }
 
 type Session struct {

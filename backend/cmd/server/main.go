@@ -118,11 +118,11 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, ui f
 	connSvc := dbconn.NewService(store, registry, cipher, az)
 	explorerSvc := explorer.NewService(store, registry, az)
 	adminSvc := admin.NewService(pool, az, auditLog)
-	migrationRepo := migration.NewRepository(pool)
 	migrationTargets := dbconn.Targets{Registry: registry}
+	migrationSvc := &migration.Service{Pool: pool, Targets: migrationTargets, Auth: az, Audit: auditLog}
 	reconcileCtx, cancelReconcile := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelReconcile()
-	if err := (migration.Reconciler{Repo: migrationRepo, Targets: migrationTargets, Logger: logger}).Reconcile(reconcileCtx); err != nil {
+	if err := (migration.Reconciler{Pool: pool, Targets: migrationTargets, Logger: logger}).Reconcile(reconcileCtx); err != nil {
 		registry.Close()
 		return nil, nil, err
 	}
@@ -144,6 +144,7 @@ func newHandler(cfg config.Config, pool *pgxpool.Pool, logger *slog.Logger, ui f
 			admin.Routes(p, adminSvc)
 			dbconn.Routes(p, connSvc)
 			explorer.Routes(p, explorerSvc)
+			migration.Routes(p, migrationSvc)
 			queue.Routes(p, queue.Handler{Jobs: queue.NewPostgres(pool), Authz: az})
 		})
 	})

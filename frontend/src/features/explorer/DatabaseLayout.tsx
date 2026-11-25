@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useParams } from "react-router-dom"
+import { NavLink, Outlet, useLocation, useParams } from "react-router-dom"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/form"
 import { ErrorState, Loading } from "@/components/ErrorState"
@@ -26,6 +26,8 @@ function SectionLink({ to, end, children }: { to: string; end?: boolean; childre
 export function DatabaseLayout() {
   const params = useParams()
   const databaseId = Number(params.databaseId)
+  const { pathname } = useLocation()
+  const onMigrations = /\/(migrations|history)(\/|$)/.test(pathname)
   const database = useDatabase(databaseId)
 
   if (database.isLoading) return <Loading />
@@ -44,15 +46,17 @@ export function DatabaseLayout() {
         </span>
       </div>
 
-      <nav aria-label="Bagian database" className="flex border-b">
+      <nav aria-label="Bagian database" className="flex overflow-x-auto overflow-y-hidden border-b whitespace-nowrap">
         <SectionLink to={`/databases/${databaseId}`} end>
           Explorer
         </SectionLink>
         <SectionLink to={`/databases/${databaseId}/diff`}>Schema diff</SectionLink>
+        <SectionLink to={`/databases/${databaseId}/migrations`}>Migrations</SectionLink>
+        <SectionLink to={`/databases/${databaseId}/history`}>Riwayat</SectionLink>
       </nav>
 
       <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
-        <aside className="lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:self-start lg:overflow-y-auto">
+        <aside className={cn("lg:sticky lg:top-4 lg:max-h-[calc(100vh-8rem)] lg:self-start lg:overflow-y-auto", onMigrations && "hidden lg:block")}>
           <SchemaTree databaseId={databaseId} activeSchema={params.schema} />
         </aside>
         <section className="min-w-0">

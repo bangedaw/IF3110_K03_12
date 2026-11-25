@@ -456,6 +456,8 @@ type MigrationRun struct {
 	Revision             int32
 	Attempt              int32
 	RevertsRunID         pgtype.Int8
+	Version              pgtype.Int4
+	CheckpointRunID      pgtype.Int8
 }
 
 type SchemaSnapshot struct {

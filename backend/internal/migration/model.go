@@ -2,112 +2,180 @@ package migration
 
 import (
 	"context"
+	"strconv"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/apigen"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/audit"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/authz"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
+	"github.com/bangedaw/IF3110_K03_12/backend/internal/platformdb/gen"
 )
 
-type Status string
-
-const (
-	Draft        Status = "draft"
-	Applied      Status = "applied"
-	RunRunning   Status = "running"
-	RunSucceeded Status = "succeeded"
-	RunFailed    Status = "failed"
-)
-
-type Migration struct {
-	ID          int64      `json:"id"`
-	DatabaseID  int64      `json:"databaseId"`
-	Title       string     `json:"title"`
-	Description string     `json:"description"`
-	SQL         string     `json:"sql"`
-	Checksum    string     `json:"checksum"`
-	Status      Status     `json:"status"`
-	Version     *int       `json:"version,omitempty"`
-	BaseVersion int        `json:"baseVersion"`
-	Revision    int        `json:"revision"`
-	CreatedBy   int64      `json:"createdBy"`
-	UpdatedBy   int64      `json:"updatedBy"`
-	AppliedBy   *int64     `json:"appliedBy,omitempty"`
-	AppliedAt   *time.Time `json:"appliedAt,omitempty"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
-}
-type Run struct {
-	ID                   int64      `json:"id"`
-	MigrationID          int64      `json:"migrationId"`
-	DatabaseID           int64      `json:"databaseId"`
-	Title                string     `json:"title"`
-	Version              *int       `json:"version,omitempty"`
-	SQL                  string     `json:"sql"`
-	Checksum             string     `json:"checksum"`
-	ExecutedBy           int64      `json:"executedBy"`
-	ExecutedByName       string     `json:"executedByName"`
-	Status               Status     `json:"status"`
-	StartedAt            time.Time  `json:"startedAt"`
-	FinishedAt           *time.Time `json:"finishedAt,omitempty"`
-	ErrorCode            string     `json:"errorCode,omitempty"`
-	ErrorMessage         string     `json:"errorMessage,omitempty"`
-	FailedStatementIndex *int       `json:"failedStatementIndex,omitempty"`
-}
-type CreateInput struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	SQL         string `json:"sql"`
-}
-type UpdateInput struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	SQL         string `json:"sql"`
-	Revision    int    `json:"revision"`
-}
-type ExecuteInput struct {
-	ExpectedRevision       int  `json:"expectedRevision"`
-	AcknowledgeHeadChanged bool `json:"acknowledgeHeadChanged"`
+type Target interface {
+	Explain(ctx context.Context, sql string, analyze bool) (*dbms.ExplainResult, error)
+	CommittedRun(ctx context.Context, runID int64) (version int, found bool, err error)
 }
 
-type Repository interface {
-	DatabaseKind(ctx context.Context, databaseID int64) (string, error)
-	Head(ctx context.Context, databaseID int64) (int, error)
-	CreateDraft(ctx context.Context, actorID, databaseID int64, in CreateInput, baseVersion int, checksum []byte) (*Migration, error)
-	Get(ctx context.Context, databaseID, migrationID int64) (*Migration, error)
-	List(ctx context.Context, databaseID int64, status string, limit, offset int) ([]Migration, int, error)
-	UpdateDraft(ctx context.Context, actorID, databaseID, migrationID int64, in UpdateInput, checksum []byte) (*Migration, error)
-	DeleteDraft(ctx context.Context, databaseID, migrationID int64, revision int) error
-	StartRun(ctx context.Context, actorID int64, m *Migration) (*Run, error)
-	FinishRun(ctx context.Context, runID int64, status Status, version *int, errCode, errMessage string, failedIndex *int) (*Run, error)
-	Runs(ctx context.Context, databaseID, migrationID int64) ([]Run, error)
-	History(ctx context.Context, databaseID int64, limit, offset int) ([]Run, int, error)
-	WithDatabaseLock(ctx context.Context, databaseID int64, fn func(context.Context) error) error
-	SaveSnapshot(ctx context.Context, databaseID, runID, actorID int64, model any) error
-}
 type TargetRegistry interface {
 	Get(ctx context.Context, databaseID int64) (Target, error)
 }
-type Target interface {
-	Apply(ctx context.Context, in ApplyRequest) (*ApplyResult, error)
-	Explain(ctx context.Context, sql string, analyze bool) (any, error)
-	Snapshot(ctx context.Context) (any, error)
-	CommittedRun(ctx context.Context, runID int64) (version int, found bool, err error)
-}
-type ApplyRequest struct {
-	RunID, MigrationID, DatabaseID int64
-	Version                        int
-	Checksum                       []byte
-	SQL                            string
-}
-type ApplyResult struct {
-	StatementsExecuted int
-	AppliedAt          time.Time
-}
 
 type Service struct {
-	Repo    Repository
+	Pool    *pgxpool.Pool
 	Targets TargetRegistry
 	Auth    authz.Authorizer
 	Audit   *audit.Logger
-	Now     func() time.Time
 }
+
+type request struct {
+	ID              int64
+	MigrationID     int64
+	Kind            gen.RequestKind
+	Status          gen.RequestStatus
+	Revision        int32
+	RequestedByName string
+	CreatedAt       time.Time
+	JobID           *int64
+	JobFailed       bool
+}
+
+func (r request) effective() gen.RequestStatus {
+	if r.JobFailed && (r.Status == gen.RequestStatusQueued || r.Status == gen.RequestStatusRunning) {
+		return gen.RequestStatusFailed
+	}
+	return r.Status
+}
+
+func (r request) open() bool {
+	switch r.effective() {
+	case gen.RequestStatusPendingReview, gen.RequestStatusApproved, gen.RequestStatusQueued, gen.RequestStatusRunning:
+		return true
+	}
+	return false
+}
+
+func (r request) up() bool { return r.Kind != gen.RequestKindRollback }
+
+func (r request) dto() apigen.MigrationRequest {
+	return apigen.MigrationRequest{
+		Id:              r.ID,
+		Kind:            apigen.MigrationKind(r.Kind),
+		Status:          apigen.MigrationStatus(r.effective()),
+		Revision:        int(r.Revision),
+		RequestedByName: r.RequestedByName,
+		CreatedAt:       r.CreatedAt,
+		JobId:           r.JobID,
+	}
+}
+
+func toMigration(row gen.GetMigrationRow, st state, level authz.Level) apigen.Migration {
+	m := row.Migration
+	out := apigen.Migration{
+		Id:                 m.ID,
+		DatabaseId:         m.DatabaseID,
+		Title:              m.Title,
+		Description:        m.Description,
+		Status:             st.status(m),
+		Position:           apigen.MigrationPosition(m.Status),
+		Version:            intPtr(m.Version),
+		Revision:           int(m.Revision),
+		UpSql:              m.SqlText,
+		DownSql:            m.DownSql.String,
+		Irreversible:       m.Irreversible,
+		IrreversibleReason: m.IrreversibleReason,
+		Batch:              batchOf(m),
+		SqlLocked:          row.SqlLocked,
+		CreatedByName:      row.CreatedByName,
+		CreatedAt:          m.CreatedAt.Time.UTC(),
+		UpdatedAt:          m.UpdatedAt.Time.UTC(),
+		Actions:            st.actions(m, row.SqlLocked, level),
+	}
+	if latest := st.latest(m.ID); latest != nil {
+		dto := latest.dto()
+		out.Request = &dto
+	}
+	if current := st.current(m.ID); current != nil {
+		out.JobId = current.JobID
+	}
+	if r := st.executable(m); r != nil {
+		out.ExecutableRequestId = &r.ID
+	}
+	return out
+}
+
+func batchOf(m gen.Migration) *apigen.MigrationBatch {
+	if !m.BatchTable.Valid {
+		return nil
+	}
+	return &apigen.MigrationBatch{
+		Schema: m.BatchSchema.String,
+		Table:  m.BatchTable.String,
+		Column: m.BatchColumn.String,
+		Size:   int(m.BatchSize.Int32),
+	}
+}
+
+func toExecution(row gen.ListExecutionsRow) apigen.MigrationExecution {
+	r := row.MigrationRun
+	return apigen.MigrationExecution{
+		Id:                 r.ID,
+		MigrationId:        r.MigrationID,
+		MigrationTitle:     row.Title,
+		Version:            intPtr(r.Version),
+		Revision:           int(r.Revision),
+		Kind:               apigen.MigrationKind(r.Kind),
+		Status:             apigen.MigrationExecutionStatus(r.Status),
+		Attempt:            int(r.Attempt),
+		ExecutedBy:         r.ExecutedBy,
+		ExecutedByName:     row.ExecutedByName,
+		ExecutedSql:        r.SqlText,
+		RevertsExecutionId: int64Ptr(r.RevertsRunID),
+		JobId:              int64Ptr(r.JobID),
+		ErrorCode:          textPtr(r.ErrorCode),
+		ErrorMessage:       textPtr(r.ErrorMessage),
+		StartedAt:          r.StartedAt.Time.UTC(),
+		FinishedAt:         timePtr(r.FinishedAt),
+	}
+}
+
+func intPtr(v pgtype.Int4) *int {
+	if !v.Valid {
+		return nil
+	}
+	n := int(v.Int32)
+	return &n
+}
+
+func int64Ptr(v pgtype.Int8) *int64 {
+	if !v.Valid {
+		return nil
+	}
+	return &v.Int64
+}
+
+func textPtr(v pgtype.Text) *string {
+	if !v.Valid {
+		return nil
+	}
+	return &v.String
+}
+
+func timePtr(v pgtype.Timestamptz) *time.Time {
+	if !v.Valid {
+		return nil
+	}
+	t := v.Time.UTC()
+	return &t
+}
+
+func text(s string) pgtype.Text { return pgtype.Text{String: s, Valid: s != ""} }
+
+func int8of(n int64) pgtype.Int8 { return pgtype.Int8{Int64: n, Valid: true} }
+
+func int4of(n int32) pgtype.Int4 { return pgtype.Int4{Int32: n, Valid: true} }
+
+func formatID(id int64) string { return strconv.FormatInt(id, 10) }

@@ -1,7 +1,7 @@
 import { http, HttpResponse } from "msw"
 import { describe, expect, it } from "vitest"
 import { server } from "@/mocks/server"
-import { ApiError, client, errorMessage, postUntyped, unwrap } from "./client"
+import { ApiError, client, errorMessage, unwrap } from "./client"
 
 function listDatabases() {
   return unwrap(client.GET("/api/databases"))
@@ -57,38 +57,6 @@ describe("unwrap", () => {
     await listDatabases()
 
     expect(credentials).toBe("same-origin")
-  })
-})
-
-describe("postUntyped", () => {
-  it("mengirim JSON dan mengembalikan body", async () => {
-    let received: unknown = null
-    server.use(
-      http.post("/api/databases/1/migrations", async ({ request }) => {
-        received = await request.json()
-        return HttpResponse.json({ id: 7 }, { status: 201 })
-      }),
-    )
-
-    await expect(postUntyped("/api/databases/1/migrations", { title: "t" })).resolves.toEqual({ id: 7 })
-    expect(received).toEqual({ title: "t" })
-  })
-
-  it("memakai detail dari body non-Problem sebagai pesan error", async () => {
-    server.use(http.post("/api/x", () => HttpResponse.json({ detail: "forbidden" }, { status: 403 })))
-
-    const error = await postUntyped("/api/x", {}).catch((e: unknown) => e)
-
-    expect(error).toBeInstanceOf(ApiError)
-    expect(error).toMatchObject({ status: 403, message: "forbidden" })
-  })
-
-  it("memetakan Problem Details apa adanya", async () => {
-    server.use(http.post("/api/x", () => HttpResponse.json({ title: "Conflict", status: 409, code: "CONFLICT" }, { status: 409 })))
-
-    const error = await postUntyped("/api/x", {}).catch((e: unknown) => e)
-
-    expect(error).toMatchObject({ status: 409, code: "CONFLICT" })
   })
 })
 

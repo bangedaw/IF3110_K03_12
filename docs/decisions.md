@@ -152,24 +152,23 @@ karena level dihitung ulang setiap kali (tanpa cache).
 - Setiap percobaan eksekusi dicatat sebagai *run*: SQL yang dijalankan, pelaksana, waktu, status, error.
 - Eksekusi berjalan dalam transaction: commit jika semua statement berhasil, rollback jika ada yang gagal.
   Run yang gagal mencatat nomor statement yang gagal beserta pesan error database.
-- Hanya satu eksekusi per database pada satu waktu: advisory lock di platform DB (eksekusi kedua langsung
-  ditolak 409) dan di database target.
-- Jika versi database berubah sejak draft dibuat (`base_version` ≠ versi saat ini), eksekusi ditolak 409
-  sampai pengguna mengonfirmasi bahwa SQL sudah ditinjau ulang.
+- Hanya satu eksekusi per database pada satu waktu: lease di platform DB (`database_locks`, dipegang worker) dan
+  advisory lock di database target.
+- Sejak Milestone 2 eksekusi berjalan di worker dan urutan diperiksa ulang tepat sebelum SQL dijalankan, sehingga
+  konfirmasi `base_version` di Milestone 1 tidak dipakai lagi.
 - Statement pengendali transaksi (`BEGIN`, `COMMIT`, `ROLLBACK`, `SAVEPOINT`) dan statement yang tidak
   boleh berada dalam transaction PostgreSQL (`VACUUM`, `CREATE INDEX CONCURRENTLY`, `CREATE DATABASE`)
   ditolak saat draft disimpan (422).
 - Script yang kosong atau hanya berisi komentar/spasi ditolak (422) karena tidak ada statement yang dijalankan.
 - Database target menyimpan tabel `_dbmp_schema_history` yang ditulis dalam transaction yang sama dengan
-  perubahan migration. Saat server start (sebelum menerima request), *reconciler* memeriksa run yang masih
+  perubahan migration. Run dari antrean dipulihkan worker. Untuk run Milestone 1 (tanpa job), saat server start
+  (sebelum menerima request) *reconciler* memeriksa run yang masih
   berstatus `running` dari proses sebelumnya: bila tercatat di `_dbmp_schema_history`, run ditandai
   berhasil dan migration diberi versinya; bila tidak, run ditandai gagal (`RECONCILED`). Run pada target
   yang tidak terjangkau dibiarkan `running` dan diperiksa lagi pada start berikutnya.
-- Setelah eksekusi berhasil, snapshot schema disimpan dengan referensi ke run-nya (dipakai schema diff).
 - EXPLAIN / EXPLAIN ANALYZE (butuh `edit`): PostgreSQL menjalankan seluruh script dalam transaction yang
-  selalu di-rollback; DDL dijalankan hanya sebagai konteks. Plan ditampilkan sebagai pohon node (jenis
-  node, relasi, index, kondisi join, cost, estimasi vs aktual baris, waktu, loop), dengan penanda node
-  termahal dan Seq Scan pada tabel besar. Nilai sequence yang terpakai saat ANALYZE tidak ikut di-rollback.
+  selalu di-rollback; DDL dijalankan hanya sebagai konteks. Plan ditampilkan apa adanya sebagai JSON
+  per statement. Nilai sequence yang terpakai saat ANALYZE tidak ikut di-rollback.
 
 ## 9. Kredensial database target
 

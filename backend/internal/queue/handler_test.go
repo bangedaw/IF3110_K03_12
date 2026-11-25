@@ -34,7 +34,7 @@ const (
 )
 
 func jobRouter() http.Handler {
-	job := apigen.Job{Id: 7, RequestId: 3, DatabaseId: 1, Kind: apigen.Rollback, Status: apigen.Partial, Attempts: 1, MaxAttempts: 3,
+	job := apigen.Job{Id: 7, RequestId: 3, DatabaseId: 1, Kind: apigen.JobKindRollback, Status: apigen.JobStatusPartial, Attempts: 1, MaxAttempts: 3,
 		BatchesCommitted: 2, RowsCommitted: 2000, CreatedAt: time.Date(2026, 11, 22, 1, 0, 0, 0, time.UTC)}
 	az := authz.NewFake().Grant(viewer, 1, authz.LevelView)
 

@@ -22,6 +22,7 @@ server.
 cp .env.example .env
 make dev                                   # platform DB + target PostgreSQL ×2 + MySQL, dengan data seed
 make run                                   # API di :8080 (migration platform DB otomatis)
+make run-worker                            # worker yang menjalankan migration dari antrean
 make web-dev                               # SPA di :5173 dengan hot reload, /api diteruskan ke :8080
 cd backend && go run ./cmd/dbmpctl create-admin -username admin   # sekali saja
 ```
@@ -163,11 +164,64 @@ Contoh log saat membuka data tabel di explorer:
 {"time":"2026-11-17T03:15:53.058+07:00","level":"INFO","msg":"sql.query.end","event":"sql.query","target":"target","database":"inventory","server":"localhost:5433","actor":2,"request_id":"arch/nUR1aEmLhS-000002","query":"SELECT \"id\"::text, … FROM \"inventory\".\"products\" ORDER BY \"inventory\".\"products\".\"id\" ASC LIMIT 2 OFFSET 0","duration_ms":17.774,"rows":2,"status":"ok"}
 ```
 
+## Migration: workflow, approval, dan riwayat
+
+Kode: `backend/internal/migration`, UI: `frontend/src/features/migrations`, API: `api/openapi.yaml` (tag
+`migrations`). Antrean, lock, retry, dan pemulihan worker dijelaskan di
+[docs/architecture.md](docs/architecture.md#kontrak-antar-ruas-milestone-2).
+
+**Definisi.** Migration punya SQL up dan SQL down, atau ditandai *irreversible* beserta alasannya. Mode batch
+(opsional) menyimpan schema, tabel, kolom, dan ukuran batch. Setiap perubahan draft menaikkan `revision`, dan
+perubahan dari revisi basi ditolak (409). Begitu pernah dieksekusi, termasuk jika gagal, SQL terkunci; perbaikan
+dibuat sebagai migration baru.
+
+**Status.** Setiap apply, rollback, dan forward adalah satu *request* (`migration_requests`) dengan alur
+Pending Review → Approved → Pending (Queue) → Running → Success / Failed / Partial. Posisi migration di riwayat
+linear disimpan terpisah: belum diterapkan, aktif (punya nomor versi), atau sudah di-rollback.
+
+**Approval.** Setiap group yang punya akses ke database, View Only maupun View + Edit, harus disetujui leader-nya.
+Pengaju yang juga leader boleh menyetujui, dan leader beberapa group cukup memutuskan sekali. Group yang belum
+punya leader membuat request tertahan. Satu penolakan menutup request; draft bisa diubah lalu diajukan lagi.
+
+**Eksekusi.** Setelah disetujui, pengguna View + Edit menekan Execute. API membuat job dan langsung mengembalikan
+job ID; SQL dijalankan `cmd/worker`. Sebelum menjalankan SQL, worker memeriksa ulang akses pelaksana, revisi,
+kelengkapan approval, dan aturan urutan. Execute ganda memakai job yang sama. Request yang gagal bisa dijalankan
+ulang, dan yang partial dilanjutkan dari checkpoint, tanpa approval baru selama approval-nya masih lengkap.
+
+**Rollback dan forward.**
+- Rollback hanya untuk migration aktif terakhir yang reversible, atau untuk membatalkan batch yang masih partial.
+- Forward hanya untuk migration yang paling akhir di-rollback, satu migration per eksekusi. Setelah ada migration
+  baru yang diterapkan, migration yang di-rollback tidak bisa di-forward lagi supaya riwayat tetap linear.
+- Eksekusi yang gagal tidak mengubah posisi aktif, dan migration lain boleh dilanjutkan.
+- Selama ada migration yang partial, migration lain di database yang sama ditolak.
+
+**Riwayat.** `migration_runs` menyimpan satu baris per attempt, berhasil maupun gagal: execution ID, migration,
+versi, revisi, pelaksana, waktu, status, jenis, attempt, dan salinan SQL yang dijalankan. Rollback mencatat
+execution yang dibatalkannya. Baris yang sudah final ditolak trigger database jika diubah. Data yang sama keluar
+di log aplikasi (`migration.execution.start` dan `migration.execution.end`), dengan credential di SQL disamarkan.
+Hide rollback menyembunyikan pasangan eksekusi sukses dan rollback sukses yang membatalkannya berdasarkan
+execution ID; attempt gagal tetap tampil.
+
+```json
+{"level":"INFO","msg":"migration.execution.start","event":"migration.execution.start","execution_id":1,"kind":"apply","revision":1,"version":1,"executed_by":2,"query":"CREATE TABLE inventory.notes (id int PRIMARY KEY, body text)","migration_id":1,"trace_id":"466ef71290782edf26e61c8412f16684","span_id":"bc03b48cc7a7137d","job_id":1,"migration_request_id":1,"database_id":1,"actor":2,"attempt":1}
+```
+
+| Endpoint | Fungsi |
+|---|---|
+| `GET/POST /api/databases/{id}/migrations` | daftar / buat draft |
+| `GET/PUT/DELETE /api/migrations/{id}` | detail / ubah / hapus draft |
+| `POST /api/migrations/{id}/submit`, `/rollback`, `/forward` | ajukan request ke review |
+| `GET/POST /api/migrations/{id}/approvals` | approval per group / setuju atau tolak |
+| `POST /api/migrations/{id}/execute` | masukkan request ke antrean, mengembalikan job ID |
+| `POST /api/migrations/{id}/explain` | EXPLAIN SQL up |
+| `GET /api/databases/{id}/migration-history` | riwayat eksekusi, `hideRollback=true` untuk menyembunyikan pasangan rollback |
+
 ## Build satu binary (demo/production)
 
 ```bash
-make build        # build SPA, salin ke backend/internal/spa/dist, embed → bin/dbmp dan bin/dbmpctl
+make build        # build SPA, salin ke backend/internal/spa/dist, embed → bin/dbmp, bin/dbmp-worker, dan bin/dbmpctl
 ./bin/dbmp        # SPA + JSON API di :8080; deep link seperti /databases/1 dilayani index.html
+./bin/dbmp-worker # worker, dijalankan sebagai proses terpisah
 ```
 
 Di production set `APP_ENV=production` (cookie `Secure`, wajib di belakang HTTPS) dan ganti
@@ -188,6 +242,7 @@ Di production set `APP_ENV=production` (cookie `Secure`, wajib di belakang HTTPS
 | `SESSION_GRACE_PERIOD` | `30s` | masa berlaku identifier lama setelah rotasi |
 | `SESSION_TOUCH_INTERVAL` | `60s` | throttle update aktivitas |
 | `OTEL_TRACES_EXPORTER` | `console` | `console` menulis span OpenTelemetry sebagai JSON ke stderr, `none` mematikannya |
+| `WORKER_CONCURRENCY` | `4` | jumlah job yang dijalankan paralel oleh satu proses worker |
 
 Untuk demo session, perpendek misalnya `SESSION_IDLE_TIMEOUT=1m SESSION_ROTATION_INTERVAL=20s`.
 

@@ -199,7 +199,7 @@ export function SchemaDiffPage() {
                   {!canEdit && <span className="text-xs text-muted-foreground">Menyimpan draft butuh akses View + Edit pada {db.name}.</span>}
                   {saved && (
                     <span role="status" className="text-sm text-emerald-600">
-                      Draft #{saved.id} tersimpan. <Link className="underline" to={`/databases/${databaseId}/migrations`}>Buka Migrations</Link>
+                      Draft #{saved.id} tersimpan. <Link className="underline" to={`/databases/${databaseId}/migrations/${saved.id}`}>Buka draft</Link>
                     </span>
                   )}
                 </div>
