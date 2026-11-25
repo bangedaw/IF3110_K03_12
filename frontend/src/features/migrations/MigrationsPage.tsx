@@ -1,17 +1,16 @@
 import { Link, useNavigate, useParams } from "react-router-dom"
-import { Button } from "@/components/ui/button"
+import { buttonVariants } from "@/components/ui/button"
 import { Badge } from "@/components/ui/form"
 import { ErrorState, Loading } from "@/components/ErrorState"
 import { useDatabase } from "@/features/explorer/api"
 import { useCreateMigration, useMigrations } from "./api"
-import { statusLabel, statusTone } from "./format"
+import { positionLabel, statusLabel, statusTone } from "./format"
 import { MigrationForm } from "./MigrationForm"
 
 export function MigrationsPage() {
   const databaseId = Number(useParams().databaseId)
   const migrations = useMigrations(databaseId)
   const database = useDatabase(databaseId)
-  const canEdit = database.data?.level === "edit"
 
   if (migrations.isLoading) return <Loading />
   if (migrations.error) return <ErrorState error={migrations.error} onRetry={() => void migrations.refetch()} />
@@ -21,12 +20,9 @@ export function MigrationsPage() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-lg font-semibold">Migrations</h2>
-        <Link className="text-sm underline" to={`/databases/${databaseId}/history`}>
-          Riwayat eksekusi
-        </Link>
-        {canEdit && (
-          <Link className="ml-auto" to={`/databases/${databaseId}/migrations/new`}>
-            <Button size="sm">Migration baru</Button>
+        {database.data?.level === "edit" && (
+          <Link className={buttonVariants({ size: "sm", className: "ml-auto" })} to={`/databases/${databaseId}/migrations/new`}>
+            Migration baru
           </Link>
         )}
       </div>
@@ -35,11 +31,12 @@ export function MigrationsPage() {
       ) : (
         <ul className="divide-y rounded-xl border">
           {items.map((m) => (
-            <li key={m.id} className="flex flex-wrap items-center gap-2 p-3">
-              <span className="font-mono text-xs text-muted-foreground">#{m.seq}</span>
-              <Link className="min-w-0 flex-1 truncate font-medium underline-offset-2 hover:underline" to={`/databases/${databaseId}/migrations/${m.id}`}>
+            <li key={m.id} className="flex flex-wrap items-center gap-2 p-3 text-sm">
+              <Link className="min-w-0 flex-1 basis-48 font-medium break-words underline-offset-2 hover:underline" to={`/databases/${databaseId}/migrations/${m.id}`}>
                 {m.title}
               </Link>
+              {m.version !== undefined && <span className="text-xs text-muted-foreground">versi {m.version}</span>}
+              <span className="text-xs text-muted-foreground">{positionLabel[m.position]}</span>
               <Badge tone={statusTone(m.status)}>{statusLabel[m.status]}</Badge>
             </li>
           ))}
@@ -51,12 +48,20 @@ export function MigrationsPage() {
 
 export function MigrationNewPage() {
   const databaseId = Number(useParams().databaseId)
+  const database = useDatabase(databaseId)
   const navigate = useNavigate()
   const create = useCreateMigration(databaseId)
+
+  if (database.isLoading) return <Loading />
+  if (database.error) return <ErrorState error={database.error} />
+  if (database.data?.level !== "edit") {
+    return <p className="text-sm text-muted-foreground">Membuat migration butuh akses View + Edit.</p>
+  }
   return (
     <div className="space-y-4">
       <h2 className="text-lg font-semibold">Migration baru</h2>
       <MigrationForm
+        kind={database.data.kind}
         submitLabel="Simpan draft"
         onSubmit={async (body) => {
           const m = await create.mutateAsync(body)

@@ -57,18 +57,6 @@ export async function unwrap<T = void>(request: Promise<Result<T>>): Promise<T> 
   return data as T
 }
 
-export async function postUntyped<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(`${origin}${path}`, {
-    method: "POST",
-    credentials: "same-origin",
-    headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  })
-  const payload: unknown = await response.json().catch(() => null)
-  if (!response.ok) throw toApiError(payload, response)
-  return payload as T
-}
-
 export function errorMessage(error: unknown, fallback = "Terjadi kesalahan"): string {
   if (error instanceof ApiError) {
     if (error.code === "DB_UNREACHABLE") return "Database target tidak terjangkau"

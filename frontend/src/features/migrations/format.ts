@@ -1,13 +1,23 @@
 import type { Migration, MigrationExecution } from "@/features/shared/types"
 
+type Tone = "neutral" | "success" | "warning" | "danger"
+
 export const statusLabel: Record<Migration["status"], string> = {
   draft: "Draft",
   pending_review: "Pending Review",
   approved: "Approved",
-  pending_queue: "Pending (Queue)",
+  rejected: "Rejected",
+  queued: "Pending (Queue)",
   running: "Running",
-  success: "Success",
+  succeeded: "Success",
   failed: "Failed",
+  partial: "Partial",
+}
+
+export const positionLabel: Record<Migration["position"], string> = {
+  draft: "Belum diterapkan",
+  applied: "Aktif",
+  rolled_back: "Sudah di-rollback",
 }
 
 export const kindLabel: Record<MigrationExecution["kind"], string> = {
@@ -16,15 +26,13 @@ export const kindLabel: Record<MigrationExecution["kind"], string> = {
   forward: "Forward",
 }
 
-export function statusTone(status: string): "neutral" | "success" | "warning" | "danger" {
-  if (status === "success") return "success"
-  if (status === "failed") return "danger"
+export function statusTone(status: Migration["status"]): Tone {
+  if (status === "succeeded") return "success"
+  if (status === "failed" || status === "rejected") return "danger"
   if (status === "draft") return "neutral"
   return "warning"
 }
 
-// Backend mengirim waktu nol (0001-01-01) selama attempt masih running.
-export function formatTime(value: string | null | undefined): string {
-  if (!value || value.startsWith("0001")) return "—"
-  return new Date(value).toLocaleString("id-ID")
+export function formatTime(value: string | undefined): string {
+  return value ? new Date(value).toLocaleString("id-ID") : "—"
 }
