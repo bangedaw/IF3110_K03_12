@@ -49,6 +49,8 @@ export function DatabaseLayout() {
           Explorer
         </SectionLink>
         <SectionLink to={`/databases/${databaseId}/diff`}>Schema diff</SectionLink>
+        <SectionLink to={`/databases/${databaseId}/migrations`}>Migrations</SectionLink>
+        <SectionLink to={`/databases/${databaseId}/history`}>Riwayat</SectionLink>
       </nav>
 
       <div className="grid gap-6 lg:grid-cols-[260px_minmax(0,1fr)]">
