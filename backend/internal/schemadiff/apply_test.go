@@ -25,6 +25,8 @@ var mutations = []string{
 	`ALTER TABLE app.reviews ADD CONSTRAINT reviews_body_check CHECK (length(body) > 0)`,
 	`ALTER TABLE app.authors DROP COLUMN homepage`,
 	`ALTER TABLE app.authors ADD COLUMN bio TEXT`,
+	`CREATE TABLE app.returns (id BIGSERIAL PRIMARY KEY, note TEXT NOT NULL)`,
+	`ALTER TABLE app.authors ADD COLUMN seqno SERIAL`,
 
 	`ALTER TABLE app.books ALTER COLUMN price TYPE numeric(12,2) USING price::numeric(12,2)`,
 	`ALTER TABLE app.books ADD COLUMN isbn character varying(20)`,

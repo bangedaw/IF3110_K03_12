@@ -281,3 +281,47 @@ func TestGenerate_EmptyAndUnsupported(t *testing.T) {
 	_, err = schemadiff.Generate("sqlite", []schemadiff.Change{{Kind: schemadiff.KindDropTable}})
 	require.ErrorIs(t, err, schemadiff.ErrUnsupportedDialect)
 }
+
+func TestGenerate_CreatesSequencesReferencedByDefaults(t *testing.T) {
+	ident := column("ident", "bigint", false, "")
+	ident.IsIdentity = true
+	before := model(table("old", []schema.Column{column("id", "integer", false, "")}, nil, nil))
+	after := model(
+		table("old", []schema.Column{
+			column("id", "integer", false, "nextval('app.old_id_seq'::regclass)"),
+			column("n", "integer", false, "nextval('app.shared_seq')"),
+		}, nil, nil),
+		table("orders", []schema.Column{
+			column("id", "bigint", false, "nextval('app.orders_id_seq')"),
+			column("n", "integer", false, "nextval('app.shared_seq')"),
+			column("ref", "integer", false, `nextval('app."Odd''s Seq"')`),
+			ident,
+		}, nil, nil),
+	)
+
+	res, err := schemadiff.Generate(schema.KindPostgres, schemadiff.Diff(before, after))
+	require.NoError(t, err)
+	require.Empty(t, res.Warnings)
+
+	index := map[string]int{}
+	var sequences []string
+	for i, s := range res.Statements {
+		index[s] = i
+		if strings.HasPrefix(s, "CREATE SEQUENCE") {
+			sequences = append(sequences, s)
+		}
+	}
+	require.ElementsMatch(t, []string{
+		"CREATE SEQUENCE IF NOT EXISTS app.old_id_seq",
+		"CREATE SEQUENCE IF NOT EXISTS app.shared_seq",
+		"CREATE SEQUENCE IF NOT EXISTS app.orders_id_seq",
+		`CREATE SEQUENCE IF NOT EXISTS app."Odd's Seq"`,
+	}, sequences, "satu kali per sequence, identity tidak butuh sequence")
+	for _, s := range res.Statements {
+		if strings.HasPrefix(s, "CREATE TABLE") || strings.HasPrefix(s, "ALTER TABLE") {
+			for _, seq := range sequences {
+				require.Less(t, index[seq], index[s], "sequence dibuat sebelum %q", s)
+			}
+		}
+	}
+}

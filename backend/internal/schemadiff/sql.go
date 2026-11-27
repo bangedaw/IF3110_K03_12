@@ -3,6 +3,7 @@ package schemadiff
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/schema"
@@ -21,6 +22,7 @@ const (
 	phaseDropIndex
 	phaseDropColumn
 	phaseDropTable
+	phaseCreateSequence
 	phaseAlterColumn
 	phaseCreateTable
 	phaseAddColumn
@@ -42,10 +44,17 @@ func Generate(dialect string, changes []Change) (Result, error) {
 	}
 
 	buckets := make([][]stmt, phaseCount)
+	seen := map[string]bool{}
 	var out Result
 
 	for _, c := range changes {
 		for _, s := range g.statements(c) {
+			if s.phase == phaseCreateSequence {
+				if seen[s.sql] {
+					continue
+				}
+				seen[s.sql] = true
+			}
 			buckets[s.phase] = append(buckets[s.phase], s)
 		}
 		out.Warnings = append(out.Warnings, g.warnings(c)...)
@@ -102,8 +111,8 @@ func (g pgGen) statements(c Change) []stmt {
 		if c.Column == nil {
 			return nil
 		}
-		return []stmt{{phaseAddColumn, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s",
-			qualified(c.Schema, c.Table), columnDef(*c.Column))}}
+		return append(sequenceFor(*c.Column), stmt{phaseAddColumn, fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s",
+			qualified(c.Schema, c.Table), columnDef(*c.Column))})
 	case KindAlterColumn:
 		return alterColumn(c)
 	case KindDropConstraint:
@@ -136,14 +145,16 @@ func (g pgGen) addTable(c Change) []stmt {
 		return nil
 	}
 	var defs []string
+	var out []stmt
 	for _, col := range c.TableDef.Columns {
 		if col.IsGenerated {
 			continue
 		}
+		out = append(out, sequenceFor(col)...)
 		defs = append(defs, "  "+columnDef(col))
 	}
-	out := []stmt{{phaseCreateTable, fmt.Sprintf("CREATE TABLE %s (\n%s\n)",
-		qualified(c.Schema, c.Table), strings.Join(defs, ",\n"))}}
+	out = append(out, stmt{phaseCreateTable, fmt.Sprintf("CREATE TABLE %s (\n%s\n)",
+		qualified(c.Schema, c.Table), strings.Join(defs, ",\n"))})
 
 	for _, cs := range c.TableDef.Constraints {
 		out = append(out, g.statements(Change{
@@ -199,6 +210,7 @@ func alterColumn(c Change) []stmt {
 			"ALTER TABLE %s ALTER COLUMN %s %s", tbl, col, clause)})
 	}
 	if prev.Default != cur.Default {
+		out = append(out, sequenceFor(cur)...)
 		clause := "DROP DEFAULT"
 		if cur.Default != "" {
 			clause = "DEFAULT " + cur.Default
@@ -229,9 +241,6 @@ func (g pgGen) warnings(c Change) []string {
 			if col.IsGenerated {
 				out = append(out, fmt.Sprintf("kolom generated %s.%s tidak ikut dibuat; tulis definisinya manual", tbl, col.Name))
 			}
-			if strings.HasPrefix(col.Default, "nextval(") {
-				out = append(out, fmt.Sprintf("default kolom %s.%s merujuk sekuens; pastikan sekuens sudah ada di database tujuan", tbl, col.Name))
-			}
 		}
 		return out
 	}
@@ -253,6 +262,19 @@ func alterWarnings(c Change) []string {
 		out = append(out, fmt.Sprintf("kolom %s.%s menjadi NOT NULL; baris yang masih NULL akan menggagalkan migrasi", tbl, name))
 	}
 	return out
+}
+
+var nextvalPattern = regexp.MustCompile(`^nextval\('((?:[^']|'')+)'(?:::regclass)?\)$`)
+
+func sequenceFor(c schema.Column) []stmt {
+	if c.IsIdentity {
+		return nil
+	}
+	m := nextvalPattern.FindStringSubmatch(c.Default)
+	if m == nil {
+		return nil
+	}
+	return []stmt{{phaseCreateSequence, "CREATE SEQUENCE IF NOT EXISTS " + strings.ReplaceAll(m[1], "''", "'")}}
 }
 
 func columnDef(c schema.Column) string {
