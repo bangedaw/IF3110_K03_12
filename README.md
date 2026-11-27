@@ -331,6 +331,36 @@ menunggu lock database. *Total* adalah keduanya.
   pemulihan. Ini sesuai desain: menahan migration berikutnya di database yang sama lebih diutamakan daripada
   throughput.
 
+## SAST dengan CodeQL
+
+Workflow: [`.github/workflows/codeql.yml`](.github/workflows/codeql.yml). CodeQL berjalan pada setiap push ke
+`main`, setiap pull request, dan seminggu sekali. Hasilnya diunggah ke tab
+[Security → Code scanning](https://github.com/bangedaw/IF3110_K03_12/security/code-scanning) dan disimpan
+sebagai artifact SARIF.
+
+**Cakupan.** Suite `security-extended`, untuk tiga bahasa:
+- **Go:** seluruh `backend/`, di-build manual (`go build ./...`) supaya `cmd/server`, `cmd/worker`, dan
+  `cmd/dbmpctl` ikut dianalisis.
+- **JavaScript/TypeScript:** seluruh `frontend/src`.
+- **GitHub Actions:** workflow di `.github/workflows`.
+
+`frontend/node_modules`, `frontend/dist`, dan `backend/internal/spa/dist` dikecualikan karena bukan kode
+sumber tim. CodeQL yang dipakai versi 2.27.6.
+
+**Hasil scan pertama** (commit `a5a0ba3`): Go 9 temuan, JavaScript/TypeScript 0, Actions 4, total 13.
+
+| # | Rule | Severity | Lokasi | Potensi dampak | Keputusan |
+|---|---|---|---|---|---|
+| 5, 6 | `go/incorrect-integer-conversion` | high | `backend/internal/dbconn/handler.go:56` | `offset` atau `limit` dari query string dikonversi ke `int32` tanpa batas atas. `offset=4294967296` meluap menjadi 0, sehingga API mengembalikan halaman pertama, bukan halaman kosong | **Valid, diperbaiki.** Nilai diparsing langsung sebagai bilangan 32-bit, dan nilai di atas batas dipotong ke batas maksimum. Test `TestListAndGet` menambahkan kasus overflow, nilai negatif, dan nilai bukan angka |
+| 1, 2, 3 | `actions/missing-workflow-permissions` | medium | `.github/workflows/ci.yml` (job `backend`, `contract`, `frontend`) | `GITHUB_TOKEN` mendapat izin bawaan repository. Jika salah satu langkah CI disusupi, token bisa dipakai untuk menulis ke repository | **Valid, diperbaiki** dengan `permissions: contents: read` di tingkat workflow. CI hanya membaca kode |
+| 4 | `actions/unpinned-tag` | medium | `.github/workflows/ci.yml:21` | `golangci/golangci-lint-action@v8` mengikuti tag yang bisa dipindahkan pemiliknya, sehingga kode action pihak ketiga bisa berubah tanpa sepengetahuan tim | **Valid, diperbaiki.** Action di-pin ke commit `4afd733a84b1f43292c63897423277bb7f4313a9`, yaitu isi tag `v8` saat ini, jadi perilakunya tidak berubah. Action resmi GitHub (`actions/*`) tidak ditandai CodeQL dan tetap memakai tag |
+| 7 | `go/sql-injection` | high | `backend/internal/dbms/mysql/browser.go:69` | Query data viewer MySQL disusun dari nama schema, tabel, dan kolom yang berasal dari URL | **False positive.** Sebelum query disusun, nama tabel dicek keberadaannya dan daftar kolom diambil dari `information_schema` dengan query berparameter. Semua identifier di-escape dengan backtick (`backtick` menggandakan karakter backtick di dalam nama), sedangkan `limit` dan `offset` berupa integer yang dibatasi `normalizePage`. Tidak ada nilai dari pengguna yang masuk ke query sebagai teks SQL. Hak akses tetap diperiksa (View Only) sebelum query dijalankan |
+| 8–12 | `go/log-injection` | medium | `backend/internal/httpx/respond.go:42`, `:47` | Path URL dan pesan error dari input pengguna ditulis ke log, sehingga penyerang mungkin bisa memalsukan baris log | **False positive.** Semua log ditulis dengan `slog.JSONHandler`, yang meng-escape baris baru, tanda kutip, dan karakter kontrol, sehingga input selalu menjadi satu nilai string di dalam satu baris JSON. `TestLogsCannotBeForgedThroughRequestValues` (`internal/httpx`) membuktikan path dan error berisi `\n{"msg":"palsu"}` tetap menghasilkan satu baris per log tanpa entri palsu. Data sensitif tetap disaring (lihat `TestLogsAndSpansNeverContainSecrets`) |
+| 13 | `go/log-injection` | medium | `backend/internal/httpx/router.go:40` | Sama seperti di atas, untuk log akses HTTP (`path`) | **False positive**, dengan alasan dan test yang sama |
+
+Hasil bersih tidak berarti aplikasi pasti aman. CodeQL tidak memeriksa konfigurasi deployment, dependensi pihak
+ketiga, maupun logika otorisasi tingkat bisnis; bagian itu diuji lewat integration test akses.
+
 ## Build satu binary (demo/production)
 
 ```bash
