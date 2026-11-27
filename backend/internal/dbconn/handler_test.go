@@ -181,6 +181,18 @@ func TestListAndGet(t *testing.T) {
 	require.Len(t, page.Items, 1)
 	require.EqualValues(t, 1, page.Total)
 
+	res, body = do(t, srv, call{http.MethodGet, "/api/admin/databases?offset=4294967296", nil, true})
+	require.Equal(t, http.StatusOK, res.StatusCode, body)
+	require.NoError(t, json.Unmarshal([]byte(body), &page))
+	require.Empty(t, page.Items, "offset di atas batas int32 tidak boleh meluap menjadi 0")
+
+	for _, q := range []string{"limit=99999999999", "limit=-5&offset=-1", "limit=abc&offset=xyz"} {
+		res, body = do(t, srv, call{http.MethodGet, "/api/admin/databases?" + q, nil, true})
+		require.Equal(t, http.StatusOK, res.StatusCode, body)
+		require.NoError(t, json.Unmarshal([]byte(body), &page))
+		require.Len(t, page.Items, 1, q)
+	}
+
 	res, body = do(t, srv, call{http.MethodGet, "/api/admin/databases/" + strconv.FormatInt(id, 10), nil, true})
 	require.Equal(t, http.StatusOK, res.StatusCode, body)
 

@@ -1,8 +1,11 @@
 package dbconn
 
 import (
+	"errors"
+	"math"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -38,22 +41,26 @@ func (s *Service) principal(w http.ResponseWriter, r *http.Request) (authz.Princ
 }
 
 func pagination(r *http.Request) (int32, int32) {
-	limit := defaultLimit
-	offset := 0
+	var limit, offset int32 = defaultLimit, 0
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
+		n, err := strconv.ParseInt(v, 10, 32)
+		switch {
+		case err == nil && n > 0:
+			limit = min(int32(n), maxLimit)
+		case errors.Is(err, strconv.ErrRange) && !strings.HasPrefix(v, "-"):
+			limit = maxLimit
 		}
-	}
-	if limit > maxLimit {
-		limit = maxLimit
 	}
 	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-			offset = n
+		n, err := strconv.ParseInt(v, 10, 32)
+		switch {
+		case err == nil && n >= 0:
+			offset = int32(n)
+		case errors.Is(err, strconv.ErrRange) && !strings.HasPrefix(v, "-"):
+			offset = math.MaxInt32
 		}
 	}
-	return int32(limit), int32(offset)
+	return limit, offset
 }
 
 func (s *Service) handleList(w http.ResponseWriter, r *http.Request) {
