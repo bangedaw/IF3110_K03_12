@@ -276,6 +276,61 @@ execution ID; attempt gagal tetap tampil.
 | `POST /api/migrations/{id}/explain` | EXPLAIN SQL up |
 | `GET /api/databases/{id}/migration-history` | riwayat eksekusi, `hideRollback=true` untuk menyembunyikan pasangan rollback |
 
+## Stress test dengan k6
+
+Skrip: [`deploy/k6/stress.js`](deploy/k6/stress.js). Jalankan setelah server, worker, dan data demo siap
+(`make run`, `make run-worker`, `dbmpctl seed-demo`):
+
+```bash
+make loadtest                      # 4 tingkat beban × 60 detik, k6 lewat image Docker grafana/k6
+make loadtest LOADTEST_STEP=10s    # versi singkat untuk mencoba skrip
+```
+
+**Isi skrip.**
+- `setup` login sebagai admin dan memberi group `backend-team` akses View + Edit ke dua database PostgreSQL
+  (inventory dan staging), supaya job dikirim ke database yang sama maupun berbeda.
+- Skenario `api` (user carol, View Only) terus memanggil daftar database, daftar migration, riwayat eksekusi,
+  dan data tabel `inventory.products`.
+- Skenario `jobs` menjalankan alur lengkap pada waktu yang sama: alice membuat migration (`SELECT pg_sleep(0.2)`),
+  mengajukannya, alice dan bob menyetujui, alice menekan Execute, lalu skrip memantau
+  `GET /api/databases/{id}/jobs/{jobId}` sampai job selesai. Database bergantian antara inventory dan staging.
+- Respons Execute (202) tidak dihitung sebagai keberhasilan. Job baru dihitung selesai setelah statusnya
+  `succeeded`, `failed`, atau `partial`, dan waktunya diambil dari `createdAt`, `startedAt`, dan `finishedAt`.
+- Beban normal ditetapkan 10 pengguna API dan 2 pengirim job. Beban naik bertahap ke 25 + 5 dan 50 + 10, lalu
+  turun kembali ke 10 + 2 untuk melihat pemulihan.
+- Threshold: p95 response time API < 500 ms dan error rate API < 1% (keseluruhan dan per tingkat), error rate
+  request alur job < 1%, dan job sukses > 99%.
+
+**Hasil** (laptop Intel Core i7-13650HX 20 thread, RAM 11 GB, server, worker dengan `WORKER_CONCURRENCY=4`,
+dan PostgreSQL berjalan di mesin yang sama; exporter span `console`):
+
+| Tingkat | Pengguna API + job | Request API | Throughput API | p50 | p95 | Error | Job selesai | Throughput job | Antre p95 | Eksekusi p95 | Total p95 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| normal | 10 + 2 | 4.640 | 77,3 req/s | 4,1 ms | 8,4 ms | 0% | 97 | 1,6 job/s | 0,8 s | 0,3 s | 1,1 s |
+| tinggi | 25 + 5 | 11.308 | 188,5 req/s | 4,5 ms | 25,1 ms | 0% | 108 | 1,8 job/s | 0,9 s | 17,4 s | 18,1 s |
+| stress | 50 + 10 | 18.848 | 314,1 req/s | 9,9 ms | 152,6 ms | 0% | 107 | 1,8 job/s | 0,8 s | 34,5 s | 34,9 s |
+| pulih | 10 + 2 | 4.140 | 69,0 req/s | 5,1 ms | 88,1 ms | 0% | 59 | 1,0 job/s | 0,8 s | 5,5 s | 5,7 s |
+
+Total 371 job, semuanya sukses, dan tidak ada threshold yang dilanggar. *Antre* adalah waktu dari job dibuat
+sampai pertama kali diambil worker. *Eksekusi* dihitung dari pengambilan pertama sampai selesai, termasuk waktu
+menunggu lock database. *Total* adalah keduanya.
+
+**Analisis.**
+- **Normal.** API stabil di bawah 10 ms. Job menunggu worker kurang dari 1 detik (interval polling worker 1
+  detik) dan selesai sekitar 1 detik setelah dibuat.
+- **Tinggi.** Throughput API naik 2,4 kali dengan p95 tetap rendah. Throughput job tidak ikut naik dan tertahan di
+  sekitar 1,8 job/s, karena setiap database hanya boleh menjalankan satu migration pada satu waktu dan hanya ada
+  dua database. Job yang mendapati database sedang dipakai dikembalikan ke antrean dengan jeda 5 detik (tercatat
+  162 kali di log worker sebagai `lock.acquire` berstatus `busy`), sehingga waktu eksekusi p95 naik ke 17 detik.
+- **Stress.** p95 API naik ke 153 ms karena API, worker, dan PostgreSQL berbagi CPU di mesin yang sama, tetapi
+  masih jauh di bawah threshold dan tidak ada request yang gagal. Antrean job memanjang (p95 total 35 detik),
+  sementara waktu tunggu worker tetap di bawah 1 detik. Jadi yang menjadi batas adalah lock per database, bukan
+  jumlah worker. Tidak ada retry, job gagal, maupun eksekusi ganda.
+- **Pulih.** Setelah beban turun, sisa antrean dari tingkat stress masih diselesaikan di awal fase ini, sehingga
+  p95 API (88 ms) dan waktu eksekusi job (5,5 detik) belum kembali ke angka normal. Error tetap 0% selama
+  pemulihan. Ini sesuai desain: menahan migration berikutnya di database yang sama lebih diutamakan daripada
+  throughput.
+
 ## Build satu binary (demo/production)
 
 ```bash

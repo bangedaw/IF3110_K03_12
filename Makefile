@@ -6,7 +6,7 @@ GOLANGCI_VERSION     := v2.5.0
 
 COMPOSE := docker compose -f deploy/docker-compose.yml
 
-.PHONY: gen lint run run-worker build web web-dev dev down seed reseed seed-large bench-update bench-batch check test test-race
+.PHONY: gen lint run run-worker loadtest build web web-dev dev down seed reseed seed-large bench-update bench-batch check test test-race
 
 dev:
 	$(COMPOSE) up -d --wait
@@ -60,6 +60,11 @@ run:
 
 run-worker:
 	cd backend && go run ./cmd/worker
+
+LOADTEST_STEP ?= 60s
+
+loadtest:
+	docker run --rm --network host -v $(CURDIR)/deploy/k6:/scripts:ro -e STEP=$(LOADTEST_STEP) grafana/k6:0.55.0 run /scripts/stress.js
 
 web:
 	cd frontend && npm ci && npm run build
