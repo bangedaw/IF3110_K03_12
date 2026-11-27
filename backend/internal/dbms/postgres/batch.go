@@ -12,7 +12,30 @@ import (
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/sqltrace"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
+
+var batchTracer = otel.Tracer("github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres")
+
+// startBatchSpan membuka span untuk satu transaction batch. Query range, statement batch, checkpoint, dan
+// commit menjadi anak span ini, sehingga trace memperlihatkan query mana milik batch ke berapa.
+func startBatchSpan(ctx context.Context, direction dbms.Direction, runID int64) (context.Context, trace.Span) {
+	return batchTracer.Start(ctx, "migration.batch", trace.WithAttributes(
+		attribute.String("migration.direction", string(direction)),
+		attribute.Int64("migration.run_id", runID),
+	))
+}
+
+func endBatchSpan(span trace.Span, err error) {
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	span.End()
+}
 
 var _ dbms.BatchMigrator = Migrator{}
 
@@ -267,8 +290,11 @@ func (m Migrator) ApplyBatches(ctx context.Context, in dbms.BatchApplyInput) (*d
 	return progress, nil
 }
 
-func applyOneBatch(ctx context.Context, conn *pgx.Conn, in dbms.BatchApplyInput, run *batchRun, p *dbms.BatchProgress, stmt, bound string) (bool, error) {
+func applyOneBatch(ctx context.Context, conn *pgx.Conn, in dbms.BatchApplyInput, run *batchRun, p *dbms.BatchProgress, stmt, bound string) (_ bool, err error) {
 	batchNo := p.BatchesCommitted + 1
+	ctx, span := startBatchSpan(ctx, dbms.DirectionUp, run.RunID)
+	defer func() { endBatchSpan(span, err) }()
+	span.SetAttributes(attribute.Int("migration.batch.number", batchNo), attribute.Int64("migration.batch.cursor_from", p.Cursor))
 	ctx = sqltrace.With(ctx, slog.Int("batch", batchNo))
 	tx, err := conn.Begin(ctx)
 	if err != nil {
@@ -288,6 +314,8 @@ func applyOneBatch(ctx context.Context, conn *pgx.Conn, in dbms.BatchApplyInput,
 		return false, fmt.Errorf("determine batch %d range: %w", batchNo, err)
 	}
 	if !end.Valid {
+		// Tidak ada row tersisa: transaction ini hanya memastikan cakupan sudah habis.
+		span.SetAttributes(attribute.Bool("migration.batch.empty", true))
 		return true, nil
 	}
 	tag, err := tx.Exec(ctx, stmt, p.Cursor, end.Int64)
@@ -307,6 +335,7 @@ func applyOneBatch(ctx context.Context, conn *pgx.Conn, in dbms.BatchApplyInput,
 		return false, batchCommitError(batchNo, err)
 	}
 	from := p.Cursor
+	span.SetAttributes(attribute.Int64("migration.batch.cursor_to", end.Int64), attribute.Int64("migration.batch.rows", tag.RowsAffected()))
 	p.BatchesCommitted = batchNo
 	p.RowsCommitted += tag.RowsAffected()
 	p.Cursor = end.Int64
@@ -389,7 +418,10 @@ func (m Migrator) RevertBatches(ctx context.Context, in dbms.BatchRevertInput) (
 	return progress, nil
 }
 
-func revertOneBatch(ctx context.Context, conn *pgx.Conn, in dbms.BatchRevertInput, run *batchRun, p *dbms.BatchProgress, stmt string) (bool, error) {
+func revertOneBatch(ctx context.Context, conn *pgx.Conn, in dbms.BatchRevertInput, run *batchRun, p *dbms.BatchProgress, stmt string) (_ bool, err error) {
+	ctx, span := startBatchSpan(ctx, dbms.DirectionDown, in.ByRunID)
+	defer func() { endBatchSpan(span, err) }()
+	span.SetAttributes(attribute.Int64("migration.reverts_run_id", run.RunID))
 	tx, err := conn.Begin(ctx)
 	if err != nil {
 		return false, err
@@ -414,6 +446,8 @@ func revertOneBatch(ctx context.Context, conn *pgx.Conn, in dbms.BatchRevertInpu
         ORDER BY u.batch_no DESC
         LIMIT 1`, run.RunID).Scan(&batchNo, &from, &to)
 	if errors.Is(err, pgx.ErrNoRows) {
+		// Semua batch sudah dibatalkan: transaction ini menandai run selesai dibatalkan dan mencatat riwayat.
+		span.SetAttributes(attribute.Bool("migration.batch.empty", true))
 		if _, err = tx.Exec(ctx, `UPDATE _dbmp_batch_run SET reverted_at = now(), reverted_by = $2 WHERE run_id = $1`, run.RunID, in.ByRunID); err != nil {
 			return false, err
 		}
@@ -429,6 +463,8 @@ func revertOneBatch(ctx context.Context, conn *pgx.Conn, in dbms.BatchRevertInpu
 	if err != nil {
 		return false, err
 	}
+	span.SetAttributes(attribute.Int("migration.batch.number", batchNo),
+		attribute.Int64("migration.batch.cursor_from", from), attribute.Int64("migration.batch.cursor_to", to))
 	ctx = sqltrace.With(ctx, slog.Int("batch", batchNo))
 	tag, err := tx.Exec(ctx, stmt, from, to)
 	if err != nil {
@@ -446,6 +482,7 @@ func revertOneBatch(ctx context.Context, conn *pgx.Conn, in dbms.BatchRevertInpu
 	if err = tx.Commit(ctx); err != nil {
 		return false, batchCommitError(batchNo, err)
 	}
+	span.SetAttributes(attribute.Int64("migration.batch.rows", tag.RowsAffected()))
 	p.BatchesReverted++
 	p.RowsReverted += tag.RowsAffected()
 	slog.InfoContext(ctx, "migration.batch.reverted", "event", "migration.batch.reverted", "status", "reverted",
