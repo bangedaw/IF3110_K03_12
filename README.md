@@ -358,6 +358,18 @@ sumber tim. CodeQL yang dipakai versi 2.27.6.
 | 8–12 | `go/log-injection` | medium | `backend/internal/httpx/respond.go:42`, `:47` | Path URL dan pesan error dari input pengguna ditulis ke log, sehingga penyerang mungkin bisa memalsukan baris log | **False positive.** Semua log ditulis dengan `slog.JSONHandler`, yang meng-escape baris baru, tanda kutip, dan karakter kontrol, sehingga input selalu menjadi satu nilai string di dalam satu baris JSON. `TestLogsCannotBeForgedThroughRequestValues` (`internal/httpx`) membuktikan path dan error berisi `\n{"msg":"palsu"}` tetap menghasilkan satu baris per log tanpa entri palsu. Data sensitif tetap disaring (lihat `TestLogsAndSpansNeverContainSecrets`) |
 | 13 | `go/log-injection` | medium | `backend/internal/httpx/router.go:40` | Sama seperti di atas, untuk log akses HTTP (`path`) | **False positive**, dengan alasan dan test yang sama |
 
+**Perbaikan dan hasil scan ulang.** Temuan valid diperbaiki di commit `12e83b3` (`fix(security): bound pagination ints
+and restrict CI token permissions`, PR #22). Scan ulang pada commit `ab8c569`:
+
+| Bahasa | Scan pertama (`a5a0ba3`) | Scan ulang (`ab8c569`) |
+|---|---|---|
+| Go | 9 | 7 (semuanya false positive di atas) |
+| JavaScript/TypeScript | 0 | 0 |
+| GitHub Actions | 4 | 0 |
+
+GitHub menandai temuan #1–#6 sebagai *fixed* secara otomatis. Temuan #7–#13 ditandai *dismissed: false positive*
+di tab Security dengan rujukan ke bagian ini.
+
 Hasil bersih tidak berarti aplikasi pasti aman. CodeQL tidak memeriksa konfigurasi deployment, dependensi pihak
 ketiga, maupun logika otorisasi tingkat bisnis; bagian itu diuji lewat integration test akses.
 
