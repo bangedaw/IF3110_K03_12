@@ -9,6 +9,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms"
 	"github.com/bangedaw/IF3110_K03_12/backend/internal/dbms/postgres"
@@ -296,4 +300,62 @@ func TestBatchStopsBetweenBatchesWhenContextIsCancelled(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 10, p.BatchesCommitted)
 	assert.Equal(t, map[int]int{1: 100}, hitsBetween(t, pool, 1, 100))
+}
+
+func TestBatchTracesEachTransactionWithItsQueries(t *testing.T) {
+	m, _ := batchFixture(t, 250)
+	recorder := tracetest.NewSpanRecorder()
+	prev := otel.GetTracerProvider()
+	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder)))
+	t.Cleanup(func() { otel.SetTracerProvider(prev) })
+	ctx := context.Background()
+
+	_, err := m.ApplyBatches(ctx, batchInput(301, 100))
+	require.NoError(t, err)
+	_, err = m.RevertBatches(ctx, dbms.BatchRevertInput{SQL: downSQL, DatabaseID: 1, RunID: 301, ByRunID: 302, LockTimeout: 300 * time.Millisecond})
+	require.NoError(t, err)
+
+	type batch struct {
+		direction string
+		number    int64
+		rows      int64
+		empty     bool
+	}
+	var batches []batch
+	batchSpans := map[string]bool{}
+	for _, s := range recorder.Ended() {
+		if s.Name() != "migration.batch" {
+			continue
+		}
+		batchSpans[s.SpanContext().SpanID().String()] = true
+		b := batch{}
+		for _, a := range s.Attributes() {
+			switch a.Key {
+			case attribute.Key("migration.direction"):
+				b.direction = a.Value.AsString()
+			case attribute.Key("migration.batch.number"):
+				b.number = a.Value.AsInt64()
+			case attribute.Key("migration.batch.rows"):
+				b.rows = a.Value.AsInt64()
+			case attribute.Key("migration.batch.empty"):
+				b.empty = a.Value.AsBool()
+			}
+		}
+		batches = append(batches, b)
+	}
+	assert.Equal(t, []batch{
+		{"up", 1, 100, false}, {"up", 2, 100, false}, {"up", 3, 50, false}, {"up", 4, 0, true},
+		{"down", 3, 50, false}, {"down", 2, 100, false}, {"down", 1, 100, false}, {"down", 0, 0, true},
+	}, batches, "satu span per transaction batch, rollback dalam urutan terbalik")
+
+	statements := 0
+	for _, s := range recorder.Ended() {
+		for _, a := range s.Attributes() {
+			if a.Key == "db.query.text" && (a.Value.AsString() == upSQL || a.Value.AsString() == downSQL) {
+				statements++
+				assert.True(t, batchSpans[s.Parent().SpanID().String()], "query batch menjadi anak span migration.batch")
+			}
+		}
+	}
+	assert.Equal(t, 6, statements)
 }

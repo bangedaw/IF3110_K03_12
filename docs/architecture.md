@@ -136,13 +136,18 @@ POST /api/databases/{databaseId}/...        span server (httpx.Trace)
     └── queue.job                           worker, induknya remote
         ├── queue.lock                      pengambilan lock database
         ├── sql.query ...                   revalidasi dan riwayat di platform DB
-        └── sql.query CREATE TABLE ...      SQL migration di database target
+        ├── sql.query CREATE TABLE ...      SQL migration biasa di database target
+        └── migration.batch                 satu span per transaction batch (mode batch)
+            └── sql.query ...               batas batch, statement batch, checkpoint, commit
 ```
 
 - Span HTTP dibuat untuk setiap request `/api` kecuali `/api/healthz`. Namanya memakai pola route chi,
   bukan path asli, supaya ID tidak membuat nama span tak terbatas. Status 5xx menandai span error.
 - `trace_context` di job hanya berisi `traceparent`. Baggage dari client tidak ikut tersimpan.
 - Pemulihan membuat span `queue.recover` di trace asal job tersebut.
+- `migration.batch` berisi arah (`up`/`down`), nomor batch, rentang cursor, dan jumlah row. Transaction
+  terakhir yang hanya memastikan cakupan sudah habis ditandai `migration.batch.empty`. Batch yang gagal
+  mencatat error dan status error. Diuji `TestBatchTracesEachTransactionWithItsQueries`.
 - `TestOneTraceSpansFromAPIRequestToSQLInWorker` (paket `queue`) menguji rantai ini.
 - `cmd/worker` memakai `service.name` `dbmp-worker`, handler log yang sama dengan server, dan
   `sqltrace.Tracer` di pool platform DB maupun koneksi target. Jumlah job paralel per proses diatur

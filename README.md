@@ -154,15 +154,75 @@ termasuk query read-only explorer dan schema diff, test koneksi, migration, sert
   `migration.batch.completed`, dan `migration.batch.reverted`.
 - Penyamaran: `PASSWORD '…'` dan `password=…` di teks SQL diganti `***`; parameter query platform DB
   (hash session dan password) tidak pernah dicatat, hanya jumlahnya; nilai `[]byte` hanya dicatat ukurannya.
-- Span OpenTelemetry (`sql.query`, `sql.commit`, …) memakai tracer global dengan atribut `db.system.name`,
-  `db.namespace`, `db.query.text`, `db.response.returned_rows`, dan `db.response.status_code`; query gagal
-  diberi status error.
+- Span OpenTelemetry (`sql.query`, `sql.commit`, …) berisi atribut `db.system.name`, `db.namespace`,
+  `db.query.text`, `db.response.returned_rows`, dan `db.response.status_code`; query gagal diberi status
+  error. Span ini menjadi anak span request API atau span job di worker (lihat bagian berikut).
 
 Contoh log saat membuka data tabel di explorer:
 
 ```json
 {"time":"2026-11-17T03:15:53.058+07:00","level":"INFO","msg":"sql.query.end","event":"sql.query","target":"target","database":"inventory","server":"localhost:5433","actor":2,"request_id":"arch/nUR1aEmLhS-000002","query":"SELECT \"id\"::text, … FROM \"inventory\".\"products\" ORDER BY \"inventory\".\"products\".\"id\" ASC LIMIT 2 OFFSET 0","duration_ms":17.774,"rows":2,"status":"ok"}
 ```
+
+### Trace dari request API sampai query di worker
+
+`backend/internal/telemetry` memasang OpenTelemetry di `cmd/server` (`service.name` `dbmp-server`) dan
+`cmd/worker` (`dbmp-worker`). Log JSON keluar ke **stdout**, span ke **stderr** (exporter console, satu
+baris JSON per span). `OTEL_TRACES_EXPORTER=none` mematikan span; log tetap jalan.
+
+Satu eksekusi migration berada di satu trace walaupun API dan worker berjalan di proses berbeda. Trace
+context (W3C `traceparent`) disimpan di kolom `jobs.trace_context` saat job dipublikasikan dan dibaca lagi
+oleh worker saat job diambil.
+
+```
+POST /api/migrations/{migrationId}/execute     span server, dbmp-server
+└── (jobs.trace_context)
+    └── queue.job                              dbmp-worker, induknya remote
+        ├── queue.lock                         lock database
+        ├── sql.query …                        revalidasi dan riwayat di platform DB
+        ├── sql.query CREATE TABLE …           migration biasa: satu transaction
+        └── migration.batch                    migration per batch: satu span per transaction batch
+            ├── sql.query SELECT max(id) …     batas batch
+            ├── sql.query UPDATE … $1 … $2     statement batch
+            ├── sql.query INSERT … checkpoint  checkpoint di transaction yang sama
+            └── sql.commit
+```
+
+- Span HTTP dibuat untuk setiap request `/api` kecuali `/api/healthz`, dinamai dengan pola route
+  (`POST /api/migrations/{migrationId}/execute`), dan hanya mencatat path tanpa query string. Status 5xx
+  menandai span error.
+- `migration.batch` berisi `migration.direction` (`up`/`down`), `migration.batch.number`, rentang cursor,
+  dan `migration.batch.rows`; batch yang gagal mencatat error dan status error. Pemulihan worker membuat span
+  `queue.recover` di trace asal job.
+- Setiap log yang ditulis di dalam request atau job otomatis membawa `trace_id`, `span_id`, `request_id`
+  (ID request HTTP), dan `actor`. Log worker juga membawa `job_id`, `migration_request_id`, `database_id`,
+  `attempt`, lalu `run_id` dan `migration_id` setelah revalidasi.
+- Semua log dan span satu eksekusi bisa dicari dengan satu `trace_id`, misalnya
+  `make run-worker 2> spans-worker.jsonl` lalu `grep <trace_id> spans-worker.jsonl`.
+
+Contoh log satu job (diringkas):
+
+```json
+{"level":"INFO","msg":"job.start","event":"job.start","status":"running","trace_id":"4468d7c57b9351619a40ad8bf4cc1914","span_id":"e03429965e794401","job_id":10,"migration_request_id":20,"database_id":1,"actor":3,"attempt":1}
+{"level":"INFO","msg":"lock.acquire","event":"lock.acquire","status":"acquired","trace_id":"4468d7c57b9351619a40ad8bf4cc1914","span_id":"48a4d1bf9e47f7a7","job_id":10,"migration_request_id":20,"database_id":1,"actor":3,"attempt":1}
+{"level":"INFO","msg":"job.end","event":"job.end","status":"succeeded","duration_ms":3,"trace_id":"4468d7c57b9351619a40ad8bf4cc1914","span_id":"e03429965e794401","job_id":10,"migration_request_id":20,"database_id":1,"actor":3,"attempt":1,"run_id":1,"migration_id":7}
+```
+
+Contoh span dari alur yang sama (diringkas, satu baris per span). `Parent.SpanID` `queue.job` sama dengan
+`SpanID` span HTTP, dan `Remote: true` menandakan induknya datang dari proses lain lewat tabel `jobs`:
+
+```json
+{"Name":"POST /api/migrations/{migrationId}/execute","SpanContext":{"TraceID":"4468d7c57b9351619a40ad8bf4cc1914","SpanID":"fcb930beb9612f62"},"Parent":{"SpanID":"0000000000000000","Remote":false},"SpanKind":2,"StartTime":"2026-11-22T12:08:47.8341545+07:00","EndTime":"2026-11-22T12:08:47.8351645+07:00","Attributes":[{"Key":"http.request.method","Value":"POST"},{"Key":"url.path","Value":"/api/migrations/7/execute"},{"Key":"dbmp.request_id","Value":"host/ygqdvzoFXP-000001"},{"Key":"http.route","Value":"/api/migrations/{migrationId}/execute"},{"Key":"http.response.status_code","Value":202}],"Status":{"Code":"Unset"},"Resource":[{"Key":"service.name","Value":"dbmp-server"}]}
+{"Name":"queue.job","SpanContext":{"TraceID":"4468d7c57b9351619a40ad8bf4cc1914","SpanID":"e03429965e794401"},"Parent":{"SpanID":"fcb930beb9612f62","Remote":true},"SpanKind":1,"StartTime":"2026-11-22T12:08:47.8351645+07:00","EndTime":"2026-11-22T12:08:47.8351645+07:00","Attributes":[{"Key":"job.id","Value":10},{"Key":"job.migration_request_id","Value":20},{"Key":"job.database_id","Value":1},{"Key":"job.attempt","Value":1}],"Status":{"Code":"Unset"},"Resource":[{"Key":"service.name","Value":"dbmp-worker"}]}
+{"Name":"sql.query","SpanContext":{"TraceID":"4468d7c57b9351619a40ad8bf4cc1914","SpanID":"ca4004a1c8cf50d1"},"Parent":{"SpanID":"e03429965e794401","Remote":false},"SpanKind":3,"StartTime":"2026-11-22T12:08:47.8351645+07:00","EndTime":"2026-11-22T12:08:47.8351645+07:00","Attributes":[{"Key":"db.system.name","Value":"postgresql"},{"Key":"db.query.text","Value":"CREATE TABLE t ()"},{"Key":"dbmp.target","Value":"target"},{"Key":"db.response.returned_rows","Value":0}],"Status":{"Code":"Unset"},"Resource":[{"Key":"service.name","Value":"dbmp-worker"}]}
+```
+
+Penjelasan lengkap, termasuk atribut log baku dan aturan penyamaran, ada di
+[docs/architecture.md](docs/architecture.md#logging-dan-tracing). Test yang membuktikan rantai trace:
+`TestOneTraceSpansFromAPIRequestToSQLInWorker` (`internal/queue`) dan
+`TestBatchTracesEachTransactionWithItsQueries` (`internal/dbms/postgres`). Test bahwa credential, cookie
+session, token CSRF, dan query string tidak masuk log maupun span: `TestLogsAndSpansNeverContainSecrets`
+(`cmd/server`).
 
 ## Migration: workflow, approval, dan riwayat
 
